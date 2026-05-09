@@ -176,8 +176,12 @@ def run_grid_search(
         print(f"{'='*70}")
         print(f"  动量窗口: {best_params['window']}")
         print(f"  持仓数:   {best_params['top_n']}")
-        print(f"  风险调整: {'开' if best_params['use_risk_adjusted'] else '关'}")
-        print(f"  趋势过滤: {'开' if best_params['use_trend_filter'] else '关'}")
+        print(f"  复合动量: {'开' if best_params.get('use_composite_momentum') else '关'}")
+        print(f"  动态仓位: {'开' if best_params.get('use_dynamic_position') else '关'}")
+        print(f"  强弱过滤: {'开' if best_params.get('use_relative_strength') else '关'}")
+        print(f"  大盘择时: MA{best_params['market_ma_window']}")
+        print(f"  调仓频率: {best_params['rebalance_freq']}周")
+        print(f"  波动率控仓: {'开' if best_params.get('use_vol_target') else '关'}")
         print(f"  夏普比率: {best_sharpe:.4f}")
         print(f"\n  Top 10 组合:")
         print(results_df.head(10).to_string(index=False))
@@ -225,12 +229,17 @@ def run_optimizer() -> None:
         # 最优组合的绩效明细
         bp = best["best_params"]
         summary = pd.DataFrame({
-            "参数": ["动量窗口", "持仓数", "风险调整", "趋势过滤", "夏普比率"],
+            "参数": ["动量窗口", "持仓数", "复合动量", "动态仓位", "强弱过滤",
+                    "大盘择时", "调仓频率", "波动率控仓", "夏普比率"],
             "最优值": [
                 str(bp["window"]),
                 str(bp["top_n"]),
-                "开" if bp["use_risk_adjusted"] else "关",
-                "开" if bp["use_trend_filter"] else "关",
+                "开" if bp.get("use_composite_momentum") else "关",
+                "开" if bp.get("use_dynamic_position") else "关",
+                "开" if bp.get("use_relative_strength") else "关",
+                f"MA{bp['market_ma_window']}",
+                f"{bp['rebalance_freq']}周",
+                "开" if bp.get("use_vol_target") else "关",
                 f"{best['best_sharpe']:.4f}",
             ],
         })
@@ -252,8 +261,10 @@ def run_optimizer() -> None:
         "回测年数": "",
         "交易次数": "",
         "最优参数": (f"窗口={bp['window']} 持仓={bp['top_n']} "
-                    f"风险调整={'开' if bp['use_risk_adjusted'] else '关'} "
-                    f"趋势过滤={'开' if bp['use_trend_filter'] else '关'}"),
+                    f"复合动量={'开' if bp.get('use_composite_momentum') else '关'} "
+                    f"动态仓位={'开' if bp.get('use_dynamic_position') else '关'} "
+                    f"强弱过滤={'开' if bp.get('use_relative_strength') else '关'} "
+                    f"大盘择时=MA{bp['market_ma_window']}"),
     }
     export_to_excel(
         best["best_signals"], metrics,
