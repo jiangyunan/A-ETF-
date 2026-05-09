@@ -82,9 +82,9 @@ def _classify_market(
 
     牛市: 广度 > 0.6 且 MA20 > MA60 且 CSI300 > MA120
           → 短窗口(10天)、集中持仓(3只)
-    震荡: CSI300 > MA120 或 广度 > 0.3，但趋势不明
+    震荡: CSI300 > MA120 且 广度 > 0.4，但趋势不够强
           → 中窗口(20天)、分散持仓(5只)
-    熊市: CSI300 < MA120 且 广度 < 0.3
+    熊市: CSI300 < MA120 或 广度 < 0.4（任一触发即防御）
           → 防御模式
     """
     if BENCHMARK_CODE not in prices.columns:
@@ -111,7 +111,7 @@ def _classify_market(
 
     if above_market and trending_up and broad_healthy:
         return ("BULL", 10, 3)
-    elif above_market or breadth > 0.3:
+    elif above_market or breadth > 0.35:  # 广度收紧到35%
         return ("SIDEWAYS", 20, 5)
     else:
         return ("BEAR", 40, 2)
@@ -357,6 +357,20 @@ def generate_signals(
             )
         else:
             scaled_weights = {c: base_weight for c in selected}
+
+        # ── 极端波动自动降仓（vol > 90分位 → 仓位 ×0.5）──
+        if risk_on:
+            nav_ret = prices.pct_change()
+            # 用策略组合中各ETF平均波动率判断（比单指数更准确）
+            pool_vol = nav_ret[selected].std(axis=1) if len(selected) > 0 else pd.Series()
+            if len(pool_vol) > vol_lookback and date in pool_vol.index:
+                recent_vol = pool_vol.loc[:date].iloc[-vol_lookback:].mean()
+                hist_vol = pool_vol.loc[:date].dropna()
+                if len(hist_vol) > vol_lookback * 2:
+                    pct_rank = (hist_vol.iloc[-vol_lookback:].mean() > hist_vol).mean()
+                    if pct_rank > 0.90:  # 当前波动率 > 历史90%的时期
+                        for code in scaled_weights:
+                            scaled_weights[code] = round(scaled_weights[code] * 0.5, 4)
 
         for code in selected:
             signals.append({
