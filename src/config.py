@@ -47,34 +47,34 @@ START_DATE: str = "20160101"
 END_DATE: str = "20260509"
 
 # ---- 策略参数 ----
-# V3 基础参数
-MOMENTUM_WINDOW: int = 10      # 单窗口动量（复合动量模式下为短期窗口）
-TOP_N: int = 5                 # 风险资产持仓数（动态仓位模式下为默认）
-USE_RISK_ADJUSTED: bool = True    # 风险调整动量（动量/波动率）
+# V4 网格搜索最优（夏普 1.14，年化 12.18%，回撤 -11.07%）
+MOMENTUM_WINDOW: int = 20      # 动量计算窗口
+TOP_N: int = 5                 # 风险资产持仓数
+USE_RISK_ADJUSTED: bool = True    # 风险调整动量
 USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤
-TREND_WINDOW: int = 60         # 单ETF趋势过滤的MA窗口
+TREND_WINDOW: int = 60           # 单ETF趋势过滤MA窗口
 
-# 双层复合动量
-USE_COMPOSITE_MOMENTUM: bool = True          # 是否启用多周期复合动量
-MOMENTUM_WINDOWS_COMPOSITE: list[int] = [10, 30, 60]  # 短/中/长 三个周期
-MOMENTUM_WEIGHTS: list[float] = [0.5, 0.3, 0.2]       # 对应权重
+# 双层复合动量（可选开启，稳定性>0.9）
+USE_COMPOSITE_MOMENTUM: bool = False
+MOMENTUM_WINDOWS_COMPOSITE: list[int] = [10, 30, 60]
+MOMENTUM_WEIGHTS: list[float] = [0.5, 0.3, 0.2]
 
-# 动态仓位（根据市场强弱调整持仓数）
-USE_DYNAMIC_POSITION: bool = True      # 牛市集中、熊市分散
-TOP_N_AGGRESSIVE: int = 3             # 强牛时持仓数（集中火力）
-TOP_N_NORMAL: int = 5                 # 一般市持仓数（分散防御）
+# 动态仓位（可选开启，稳定性>0.9）
+USE_DYNAMIC_POSITION: bool = False
+TOP_N_AGGRESSIVE: int = 3
+TOP_N_NORMAL: int = 5
 
-# 相对强弱过滤（必须跑赢基准才算有效动量）
-USE_RELATIVE_STRENGTH: bool = True     # 仅选动量 > 基准（沪深300）的 ETF
+# 相对强弱过滤（可选开启，稳定性>0.6）
+USE_RELATIVE_STRENGTH: bool = False
 RELATIVE_STRENGTH_BENCHMARK: str = "510300"
 
-# 大盘择时（风险/防御切换）
-MARKET_MA_WINDOW: int = 120       # 沪深300 > N日均线 → 风险资产；否则 → 防御资产
-MARKET_MA_AGGRESSIVE: int = 200   # 沪深300 > 此均线 → 强牛模式（动态仓位用到）
+# 大盘择时
+MARKET_MA_WINDOW: int = 120
+MARKET_MA_AGGRESSIVE: int = 200
 DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 
 # 调仓频率
-REBALANCE_FREQ: int = 1        # 1=每周, 2=双周, 4=月
+REBALANCE_FREQ: int = 1        # 1=周, 2=双周（月频崩，勿用4）
 
 # 波动率仓位控制
 USE_VOL_TARGET: bool = True
