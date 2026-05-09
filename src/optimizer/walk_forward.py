@@ -36,11 +36,12 @@ TRAIN_DAYS = int(TRAIN_YEARS * 252)  # 约 756 个交易日
 TEST_DAYS = int(TEST_MONTHS / 12 * 252)  # 约 126 个交易日
 
 # 搜索空间（与 optimizer 一致，但可以缩小以加速）
-SEARCH_WINDOWS = [5, 10, 20, 40, 60]
-SEARCH_TOP_NS = [1, 2, 3, 5]
-SEARCH_RISK_ADJUSTED = [False, True]
-SEARCH_TREND_FILTER = [False, True]
-SEARCH_MARKET_MA = [0, 60, 100, 200]
+SEARCH_WINDOWS = [10, 20, 40]
+SEARCH_TOP_NS = [2, 3, 5]
+SEARCH_RISK_ADJUSTED = [True]
+SEARCH_REBALANCE_FREQ = [1, 2, 4]
+SEARCH_MARKET_MA = [0, 60, 120, 200]
+SEARCH_VOL_TARGET = [False, True]
 
 
 def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
@@ -48,15 +49,17 @@ def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
     best_sharpe = -np.inf
     best_params = {}
 
-    for window, top_n, use_ra, use_tf, market_ma in product(
+    for window, top_n, use_ra, freq, market_ma, use_vol in product(
         SEARCH_WINDOWS, SEARCH_TOP_NS, SEARCH_RISK_ADJUSTED,
-        SEARCH_TREND_FILTER, SEARCH_MARKET_MA,
+        SEARCH_REBALANCE_FREQ, SEARCH_MARKET_MA, SEARCH_VOL_TARGET,
     ):
         signals = generate_weekly_signals(
             prices_is,
             window=window, top_n=top_n,
-            use_risk_adjusted=use_ra, use_trend_filter=use_tf,
+            use_risk_adjusted=use_ra,
             market_ma_window=market_ma,
+            rebalance_freq=freq,
+            use_vol_target=use_vol,
         )
         if signals.empty:
             continue
@@ -66,8 +69,10 @@ def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
             best_sharpe = sharpe
             best_params = {
                 "window": window, "top_n": top_n,
-                "use_risk_adjusted": use_ra, "use_trend_filter": use_tf,
+                "use_risk_adjusted": use_ra,
                 "market_ma_window": market_ma,
+                "rebalance_freq": freq,
+                "use_vol_target": use_vol,
             }
     return best_params
 
@@ -143,8 +148,9 @@ def run_walk_forward(verbose: bool = True) -> dict:
             window=best_params["window"],
             top_n=best_params["top_n"],
             use_risk_adjusted=best_params["use_risk_adjusted"],
-            use_trend_filter=best_params["use_trend_filter"],
             market_ma_window=best_params["market_ma_window"],
+            rebalance_freq=best_params["rebalance_freq"],
+            use_vol_target=best_params["use_vol_target"],
         )
 
         result_oos = run_backtest(prices_oos, signals_oos, benchmark.iloc[fold["test_start"]:fold["test_end"]])
@@ -165,9 +171,9 @@ def run_walk_forward(verbose: bool = True) -> dict:
             "训练期": f"{fold['train_dates'][0]} ~ {fold['train_dates'][1]}",
             "测试期": f"{fold['test_dates'][0]} ~ {fold['test_dates'][1]}",
             "IS最优参数": (f"w={best_params['window']} n={best_params['top_n']} "
-                       f"RA={'Y' if best_params['use_risk_adjusted'] else 'N'} "
-                       f"TF={'Y' if best_params['use_trend_filter'] else 'N'} "
-                       f"MA={best_params['market_ma_window']}"),
+                       f"freq={best_params['rebalance_freq']}w "
+                       f"MA={best_params['market_ma_window']} "
+                       f"vol={'Y' if best_params['use_vol_target'] else 'N'}"),
             "OOS夏普": fold_sharpe,
             "OOS年化": fold_ann,
             "OOS回撤": fold_dd,

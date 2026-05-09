@@ -22,9 +22,12 @@ from src.config import (
     MOMENTUM_WINDOW,
     TOP_N,
     USE_RISK_ADJUSTED,
-    TREND_WINDOW,
     USE_TREND_FILTER,
+    TREND_WINDOW,
     MARKET_MA_WINDOW,
+    REBALANCE_FREQ,
+    USE_VOL_TARGET,
+    VOL_TARGET,
     BENCHMARK_CODE,
     OUTPUT_DIR,
 )
@@ -50,7 +53,9 @@ def run_single_backtest() -> None:
     print(f"\n[2/4] 生成调仓信号...")
     print(f"      参数: 窗口={MOMENTUM_WINDOW} 持仓={TOP_N} "
           f"风险调整={'开' if USE_RISK_ADJUSTED else '关'} "
-          f"趋势过滤={'开' if USE_TREND_FILTER else '关'}")
+          f"调仓={REBALANCE_FREQ}周 "
+          f"大盘择时=MA{MARKET_MA_WINDOW} "
+          f"波动率控仓={'开' if USE_VOL_TARGET else '关'}")
     signals = generate_weekly_signals(
         prices,
         window=MOMENTUM_WINDOW,
@@ -59,6 +64,9 @@ def run_single_backtest() -> None:
         use_trend_filter=USE_TREND_FILTER,
         trend_window=TREND_WINDOW,
         market_ma_window=MARKET_MA_WINDOW,
+        rebalance_freq=REBALANCE_FREQ,
+        use_vol_target=USE_VOL_TARGET,
+        vol_target=VOL_TARGET,
     )
     if signals.empty:
         print("      错误：未生成任何信号，请检查数据或动量窗口设置")
@@ -115,6 +123,9 @@ def run_signal() -> None:
         use_trend_filter=USE_TREND_FILTER,
         trend_window=TREND_WINDOW,
         market_ma_window=MARKET_MA_WINDOW,
+        rebalance_freq=REBALANCE_FREQ,
+        use_vol_target=USE_VOL_TARGET,
+        vol_target=VOL_TARGET,
     )
 
     if signals.empty:
