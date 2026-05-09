@@ -38,7 +38,10 @@ def _load_cache(code: str) -> pd.DataFrame | None:
 def _save_cache(code: str, df: pd.DataFrame) -> None:
     """将数据写入本地 CSV 缓存"""
     os.makedirs(CACHE_DIR, exist_ok=True)
-    df.to_csv(_get_cache_path(code), index=False)
+    try:
+        df.to_csv(_get_cache_path(code), index=False)
+    except OSError as e:
+        print(f"[警告] 缓存写入失败 {code}: {e}")
 
 
 def _to_sina_symbol(code: str) -> str:
@@ -167,9 +170,17 @@ def fetch_all_etf_data(
     prices = prices.sort_index()
 
     # 前向填充：处理非交易日（如跨境ETF在国外假期时不交易）
-    prices = prices.ffill()
+    # limit=5：最多填充连续5天，避免退市/长期停牌ETF的过期价格被无限传播
+    prices = prices.ffill(limit=5)
 
-    # 提取基准序列
-    benchmark = prices[BENCHMARK_CODE].dropna()
+    # 提取基准序列（若基准代码不在价格表中则用第一列兜底）
+    if BENCHMARK_CODE in prices.columns:
+        benchmark = prices[BENCHMARK_CODE].dropna()
+    elif len(prices.columns) > 0:
+        col = prices.columns[0]
+        print(f"[警告] 基准 {BENCHMARK_CODE} 不在价格表中，用 {col} 兜底")
+        benchmark = prices[col].dropna()
+    else:
+        benchmark = pd.Series(dtype=float)
 
     return prices, benchmark
