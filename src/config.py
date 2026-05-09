@@ -28,7 +28,11 @@ START_DATE: str = "20220101"
 END_DATE: str = "20250509"
 
 # ---- 策略参数 ----
-MOMENTUM_WINDOW: int = 20  # 动量计算窗口：过去 N 个交易日
+MOMENTUM_WINDOW: int = 20      # 动量计算窗口：过去 N 个交易日（V1 默认）
+TOP_N: int = 1                 # 持仓数量：每周持有前 N 名（1 = 原策略）
+USE_RISK_ADJUSTED: bool = False   # 是否用风险调整动量（动量/波动率）
+USE_TREND_FILTER: bool = False    # 是否启用绝对动量趋势过滤（收盘 > MA）
+TREND_WINDOW: int = 60         # 趋势过滤的 MA 窗口：默认 60 日（约一个季度）
 
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比
