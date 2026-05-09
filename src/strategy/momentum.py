@@ -49,79 +49,72 @@ def calc_composite_momentum(
     return composite
 
 
-# ─── 市场健康度评分（连续值，替代离散状态机）────────────────
+# ─── 市场状态机 V6（广度增强）─────────────────────────────────
 
-def _calc_market_health(
-    prices: pd.DataFrame,
-    date: pd.Timestamp,
-    breadth_window: int = 60,
-    market_window: int = 120,
-    trend_short: int = 20,
-    trend_medium: int = 60,
-) -> float:
+def _market_breadth(prices: pd.DataFrame, date: pd.Timestamp, window: int = 60) -> float:
+    """攻击池中 > MA(N) 的 ETF 占比 (0~1)。"""
+    codes = [c for c in prices.columns if c not in DEFENSE_ETF_CODES and c != BENCHMARK_CODE]
+    codes = [c for c in codes if c in prices.columns]
+    if not codes:
+        return 0.5
+    above = 0
+    valid = 0
+    for code in codes:
+        s = prices[code]
+        if date not in s.index:
+            continue
+        idx = s.index.get_loc(date)
+        if idx < window:
+            continue
+        ma = s.iloc[max(0, idx - window + 1):idx + 1].mean()
+        if s.iloc[idx] > ma:
+            above += 1
+        valid += 1
+    return above / valid if valid > 0 else 0.5
+
+
+def _classify_market(
+    prices: pd.DataFrame, date: pd.Timestamp,
+    ma_trend_short: int = 20, ma_trend_medium: int = 60, ma_market: int = 120,
+) -> tuple[str, int, int]:
     """
-    计算市场健康度评分 (0~1)，融合两个维度：
+    三态判断：牛市/震荡/熊市，融入广度辅助。
 
-    1. 市场广度 — 攻击池中站上 MA(N) 的 ETF 占比
-       看的是「市场内部结构」，比单指数 MA 更稳定。
-       80%以上 → 强牛，大部分走弱 → 熊市将至。
-
-    2. 趋势强度 — 沪深300相对 MA 的偏离度
-       看的是「大盘方向」，归一化到 0~1。
-
-    合成：score = 0.5 × 广度 + 0.5 × 趋势
-
-    返回: 0~1 之间的连续值（而非离散三态）
+    牛市: 广度 > 0.6 且 MA20 > MA60 且 CSI300 > MA120
+          → 短窗口(10天)、集中持仓(3只)
+    震荡: CSI300 > MA120 或 广度 > 0.3，但趋势不明
+          → 中窗口(20天)、分散持仓(5只)
+    熊市: CSI300 < MA120 且 广度 < 0.3
+          → 防御模式
     """
     if BENCHMARK_CODE not in prices.columns:
-        return 0.5
+        return ("SIDEWAYS", 20, 5)
 
     bm = prices[BENCHMARK_CODE]
     if date not in bm.index:
-        return 0.5
+        return ("SIDEWAYS", 20, 5)
 
     idx = bm.index.get_loc(date)
-    if idx < market_window:
-        return 0.5
+    if idx < ma_market:
+        return ("SIDEWAYS", 20, 5)
 
-    # ── 1. 市场广度：攻击池中 > MA 的 ETF 占比 ──
-    attack_codes = [c for c in prices.columns if c not in DEFENSE_ETF_CODES and c != BENCHMARK_CODE]
-    if not attack_codes:
-        breadth = 0.5
-    else:
-        above_count = 0
-        for code in attack_codes:
-            if code not in prices.columns:
-                continue
-            series = prices[code]
-            if date not in series.index:
-                continue
-            idx_c = series.index.get_loc(date)
-            if idx_c < breadth_window:
-                continue
-            ma = series.iloc[max(0, idx_c - breadth_window + 1):idx_c + 1].mean()
-            if series.iloc[idx_c] > ma:
-                above_count += 1
-        breadth = above_count / len(attack_codes) if len(attack_codes) > 0 else 0.5
-
-    # ── 2. 趋势强度：价格相对 MA 的偏离 ──
     price_now = bm.iloc[idx]
-    ma_market = bm.iloc[max(0, idx - market_window + 1):idx + 1].mean()
-    ma_short = bm.iloc[max(0, idx - trend_short + 1):idx + 1].mean()
-    ma_medium = bm.iloc[max(0, idx - trend_medium + 1):idx + 1].mean()
+    ma_s = bm.iloc[max(0, idx - ma_trend_short + 1):idx + 1].mean()
+    ma_m = bm.iloc[max(0, idx - ma_trend_medium + 1):idx + 1].mean()
+    ma_l = bm.iloc[max(0, idx - ma_market + 1):idx + 1].mean()
 
-    # 趋势偏离：价格在 MA 上方多少（归一化到 [-0.5, 0.5] 再映射到 [0, 1]）
-    trend_deviation = (price_now / ma_market - 1) if ma_market > 0 else 0
-    trend_deviation = max(-0.5, min(0.5, trend_deviation))
-    trend_score = (trend_deviation + 0.5)  # → [0, 1]
+    breadth = _market_breadth(prices, date, window=60)
 
-    # 均线排列加分：短期>中期趋势确认
-    if ma_short > ma_medium:
-        trend_score = min(1.0, trend_score + 0.15)  # 趋势向上加分
+    above_market = price_now > ma_l
+    trending_up = ma_s > ma_m
+    broad_healthy = breadth > 0.6
 
-    # ── 合成健康度 ──
-    health = 0.5 * breadth + 0.5 * trend_score
-    return round(health, 3)
+    if above_market and trending_up and broad_healthy:
+        return ("BULL", 10, 3)
+    elif above_market or breadth > 0.3:
+        return ("SIDEWAYS", 20, 5)
+    else:
+        return ("BEAR", 40, 2)
 
 
 # ─── 相关性控制 ──────────────────────────────────────────────
@@ -279,23 +272,20 @@ def generate_signals(
         if date not in momentum_df.index:
             continue
 
-        # ── 市场健康度评分（连续 0~1，替代离散三态）──
+        # ── 市场状态判断（广度增强）──
         if use_market_state_machine:
-            health = _calc_market_health(
-                prices, date, breadth_window=60, market_window=market_ma_window,
-                trend_short=ma_trend_short, trend_medium=ma_trend_medium,
+            state, dyn_window, dyn_top_n = _classify_market(
+                prices, date, ma_trend_short, ma_trend_medium, market_ma_window,
             )
-            # 健康度 → 窗口（10~40天）、持仓数（2~7只）
-            ef_window = 40 - int(health * 30)  # health=1→10, health=0→40
-            ef_top_n = max(2, int(health * 7))  # health=1→7, health=0→2
-            # 健康度 < 0.35 → 切防御池；否则攻击池
-            if health < 0.35:
-                pool = defense_codes
-                risk_on = False
-                ef_top_n = min(ef_top_n, len(pool))
+            if state == "BULL":
+                ef_window = state_bull_window
+                ef_top_n = state_bull_top_n
+            elif state == "BEAR":
+                ef_window = state_bear_window
+                ef_top_n = dyn_top_n
             else:
-                pool = [c for c in attack_codes if c in momentum_df.columns]
-                risk_on = True
+                ef_window = state_sideways_window
+                ef_top_n = state_sideways_top_n
         elif use_dynamic_position:
             bm = prices[BENCHMARK_CODE] if BENCHMARK_CODE in prices.columns else None
             if bm is not None and date in bm.index:
@@ -310,22 +300,20 @@ def generate_signals(
         else:
             ef_window = window
             ef_top_n = top_n
-            # 基础市场过滤（状态机关闭时的兜底防御）
+            state = "RISK_ON"
+            # 基础市场过滤兜底
             if market_ma_window > 0 and BENCHMARK_CODE in prices.columns:
                 bm = prices[BENCHMARK_CODE]
                 if date in bm.index and date in bm.rolling(market_ma_window).mean().index:
-                    if bm.loc[date] > bm.rolling(market_ma_window).mean().loc[date]:
-                        pool = [c for c in attack_codes if c in momentum_df.columns]
-                        risk_on = True
-                    else:
-                        pool = defense_codes
-                        risk_on = False
-                else:
-                    pool = [c for c in attack_codes if c in momentum_df.columns]
-                    risk_on = True
-            else:
-                pool = [c for c in attack_codes if c in momentum_df.columns]
-                risk_on = True
+                    state = "RISK_ON" if bm.loc[date] > bm.rolling(market_ma_window).mean().loc[date] else "BEAR"
+
+        # ── 选池 ──
+        if state == "BEAR":
+            pool = defense_codes
+            risk_on = False
+        else:
+            pool = [c for c in attack_codes if c in momentum_df.columns]
+            risk_on = True
 
         if not pool:
             continue
@@ -377,7 +365,7 @@ def generate_signals(
                 "name": ETF_POOL.get(code, ""),
                 "momentum": round(float(top.get(code, 0)), 4),
                 "weight": round(scaled_weights.get(code, base_weight), 4),
-                "health": round(health, 3) if use_market_state_machine else (1.0 if risk_on else 0.0),
+                "state": state if use_market_state_machine else ("RISK_ON" if risk_on else "BEAR"),
             })
 
     signal_df = pd.DataFrame(signals)
