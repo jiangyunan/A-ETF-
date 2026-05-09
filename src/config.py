@@ -87,7 +87,7 @@ DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 REBALANCE_FREQ: int = 1
 
 # 波动率仓位控制（V5 最优中关闭，状态机已有足够风控）
-USE_VOL_TARGET: bool = False
+USE_VOL_TARGET: bool = True
 VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
 VOL_CAP: float = 1.5

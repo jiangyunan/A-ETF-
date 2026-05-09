@@ -83,11 +83,11 @@ def run_single_backtest() -> None:
         print("      错误：未生成任何信号，请检查数据或动量窗口设置")
         return
     print(f"      共生成 {len(signals)} 条调仓信号")
-    if 'state' in signals.columns:
-        for st in ['BULL', 'SIDEWAYS', 'BEAR']:
-            cnt = (signals['state'] == st).sum()
-            if cnt > 0:
-                print(f"      {st}: {cnt} 条 ({cnt/len(signals)*100:.0f}%)")
+    if 'health' in signals.columns:
+        avg_h = signals[signals['health'] > 0.35]['health'].mean()
+        n_def = (signals['health'] < 0.35).sum()
+        if n_def > 0 or avg_h > 0:
+            print(f"      健康度均值: {avg_h:.2f} | 防御期: {n_def}条 ({n_def/len(signals)*100:.0f}%)")
     print(f"      首条: {signals.iloc[0]['date'].date()} → {signals.iloc[0]['name']}")
     print(f"      末条: {signals.iloc[-1]['date'].date()} → {signals.iloc[-1]['name']}")
 
@@ -166,9 +166,14 @@ def run_signal() -> None:
 
     print(f"\n{'=' * 60}")
     print(f"  信号日期: {latest_date.date()}")
-    st = latest_signals['state'].iloc[0] if 'state' in latest_signals.columns else 'UNKNOWN'
-    state_labels = {'BULL': '⚔️ 牛市 (集中)', 'SIDEWAYS': '📊 震荡 (分散)', 'BEAR': '🛡️ 熊市 (防御)'}
-    print(f"  市场状态: {state_labels.get(st, st)}")
+    st_val = latest_signals['health'].iloc[0] if 'health' in latest_signals.columns else 1.0
+    if st_val < 0.35:
+        mode = "🛡️ 防御模式"
+    elif st_val > 0.6:
+        mode = f"⚔️ 主动模式 (健康度: {st_val:.2f})"
+    else:
+        mode = f"📊 中性模式 (健康度: {st_val:.2f})"
+    print(f"  市场状态: {mode}")
     print(f"  策略: 状态机={'开' if USE_MARKET_STATE_MACHINE else '关'} "
           f"相关过滤={'开' if USE_CORRELATION_FILTER else '关'} "
           f"波动率控仓={'开' if USE_VOL_TARGET else '关'}")
