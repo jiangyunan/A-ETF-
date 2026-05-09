@@ -16,6 +16,18 @@ plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "SimHei", "WenQuanYi Micro Hei
 plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 
 
+def _ensure_dir(path: str) -> None:
+    """确保文件输出目录存在（处理无目录成分的裸文件名）。"""
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+
+def _common_index(a: pd.Series, b: pd.Series) -> pd.DatetimeIndex:
+    """返回两条净值曲线共同的日期索引。"""
+    return a.dropna().index.intersection(b.dropna().index)
+
+
 def plot_equity_curve(
     strategy_nav: pd.Series,
     benchmark_nav: pd.Series,
@@ -29,12 +41,12 @@ def plot_equity_curve(
         benchmark_nav: 基准净值序列
         save_path: 图片保存路径
     """
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    _ensure_dir(save_path)
 
     fig, ax = plt.subplots(figsize=(14, 6))
 
     # 对齐两条曲线到共同的日期范围
-    common = strategy_nav.dropna().index.intersection(benchmark_nav.dropna().index)
+    common = _common_index(strategy_nav, benchmark_nav)
 
     ax.plot(strategy_nav.loc[common], label="Strategy (Momentum Rotation)", linewidth=1.5, color="#1f77b4")
     ax.plot(benchmark_nav.loc[common], label="Benchmark (CSI 300)", linewidth=1.2, color="#d62728", alpha=0.8)
@@ -88,13 +100,14 @@ def export_to_excel(
         benchmark_nav: 基准净值序列
         save_path: Excel 保存路径
     """
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    _ensure_dir(save_path)
 
     with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
         # Sheet 1: 持仓明细
         if not signals.empty:
             signals_out = signals.copy()
-            signals_out["date"] = signals_out["date"].dt.strftime("%Y-%m-%d")
+            if pd.api.types.is_datetime64_any_dtype(signals_out["date"]):
+                signals_out["date"] = signals_out["date"].dt.strftime("%Y-%m-%d")
             signals_out.to_excel(writer, sheet_name="持仓明细", index=False)
 
         # Sheet 2: 绩效汇总
@@ -104,7 +117,7 @@ def export_to_excel(
         metrics_df.to_excel(writer, sheet_name="绩效汇总", index=False)
 
         # Sheet 3: 净值序列
-        common = strategy_nav.dropna().index.intersection(benchmark_nav.dropna().index)
+        common = _common_index(strategy_nav, benchmark_nav)
         nav_df = pd.DataFrame({
             "日期": common,
             "策略净值": strategy_nav.loc[common].values,
