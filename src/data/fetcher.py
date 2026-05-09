@@ -113,6 +113,12 @@ def _smart_fetch(code: str, start: str, end: str) -> pd.DataFrame:
     latest_date = cached["日期"].max()
     end_dt = datetime.strptime(end, "%Y%m%d")
 
+    if pd.isna(latest_date):
+        # 缓存中日期列异常（全 NaN），重新全量拉取
+        df = _fetch_single(code, start, end)
+        _save_cache(code, df)
+        return df
+
     if latest_date >= end_dt:
         return cached
 
