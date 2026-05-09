@@ -15,6 +15,14 @@ import numpy as np
 import pandas as pd
 
 
+def _get_weekly_dates(dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """从日线日期中提取每周最后一个交易日（与 strategy 模块保持一致）。"""
+    iso = dates.isocalendar()
+    df = pd.DataFrame({"date": dates, "year": iso["year"], "week": iso["week"]})
+    weekly_last = df.groupby(["year", "week"])["date"].max()
+    return pd.DatetimeIndex(weekly_last.values)
+
+
 def _assign_daily_holdings(
     signals: pd.DataFrame,
     prices: pd.DataFrame,
@@ -28,11 +36,12 @@ def _assign_daily_holdings(
 
     Returns:
         holdings: DataFrame，行=日期，列=ETF代码，值=0或1
-                  每行有且仅有一个 1，表示当天持有哪只 ETF
 
     逻辑：
-      从信号日期（周五）的下一个交易日起，到下一个信号日之前，
-      都持有该信号选中的 ETF。
+      以每周最后一个交易日为界，逐周分配持仓。
+      有信号的周 → 持有对应 ETF；无信号的周（全部下跌跳过）→ 空仓。
+      每次持仓从「本周最后一个交易日+1」（即下周第一个交易日）开始，
+      持续到「下周最后一个交易日」为止。
     """
     all_dates = prices.index
     holdings = pd.DataFrame(0, index=all_dates, columns=prices.columns)
@@ -40,27 +49,31 @@ def _assign_daily_holdings(
     if signals.empty:
         return holdings
 
-    for i, row in signals.iterrows():
-        signal_date = row["date"]
-        code = row["code"]
+    # 日期 → ETF 代码 的快速查找表
+    signal_map: dict[pd.Timestamp, str] = dict(zip(signals["date"], signals["code"]))
 
-        # 确定持有期的起止日期
-        # 信号在周五收盘后生成，从下一个交易日（通常是下周一）开始持有
-        signal_pos = all_dates.get_loc(signal_date)
-        start_idx = signal_pos + 1  # 下一交易日
+    # 获取每周最后一个交易日（与信号生成的周划分一致）
+    weekly_dates = _get_weekly_dates(all_dates)
 
-        if i + 1 < len(signals):
-            next_signal_date = signals.iloc[i + 1]["date"]
-            end_idx = all_dates.get_loc(next_signal_date) + 1
-        else:
-            end_idx = len(all_dates)
+    for i in range(len(weekly_dates)):
+        week_end = weekly_dates[i]
 
-        # 边界保护：防止 start_idx 超出范围
-        if start_idx >= len(all_dates):
+        # 持有期从本周最后一个交易日之后开始
+        start_pos = all_dates.get_loc(week_end) + 1
+        if start_pos >= len(all_dates):
             continue
 
-        # 持有期内，该 ETF 标记为 1
-        holdings.iloc[start_idx:end_idx, holdings.columns.get_loc(code)] = 1
+        # 持有期到下周最后一个交易日为止
+        if i + 1 < len(weekly_dates):
+            end_pos = all_dates.get_loc(weekly_dates[i + 1])
+        else:
+            end_pos = len(all_dates)
+
+        # 本周有信号才持仓，无信号则自动空仓（holdings 默认为 0）
+        if week_end in signal_map:
+            code = signal_map[week_end]
+            col_idx = holdings.columns.get_loc(code)
+            holdings.iloc[start_pos:end_pos, col_idx] = 1
 
     return holdings
 
