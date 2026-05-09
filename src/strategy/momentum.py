@@ -11,7 +11,7 @@
 
 import pandas as pd
 
-from src.config import MOMENTUM_WINDOW
+from src.config import ETF_POOL, MOMENTUM_WINDOW
 
 
 def calc_momentum(
@@ -65,16 +65,17 @@ def generate_weekly_signals(
         window: 动量窗口
 
     Returns:
-        signals: DataFrame，包含三列：
-          - date:       信号生成日期（周五）
+        signals: DataFrame，包含四列：
+          - date:       信号生成日期（每周最后一个交易日）
           - code:       被选中的 ETF 代码
           - name:       ETF 名称（便于阅读）
           - momentum:   该 ETF 当时的动量值
 
     信号逻辑：
-      每周五收盘后 → 看各 ETF 过去 20 日涨幅 → 选涨幅最大的 → 下周一买入
+      每周最后一个交易日收盘后 → 看各 ETF 过去 N 日涨幅 → 选涨幅最大的 → 下周持有
     """
-    from src.config import ETF_POOL
+    if prices.empty:
+        return pd.DataFrame(columns=["date", "code", "name", "momentum"])
 
     # Step 1: 计算所有 ETF 的动量
     momentum_df = calc_momentum(prices, window)
@@ -82,30 +83,34 @@ def generate_weekly_signals(
     # Step 2: 找出每周最后一个交易日
     weekly_dates = _get_weekly_last_dates(prices.index)
 
-    # Step 3: 只取每周最后一天的动量行
-    # reindex 后 ffill 是因为 momentum 列的日期可能略少于 prices（窗口期）
-    weekly_momentum = momentum_df.reindex(weekly_dates, method="ffill")
+    # Step 3: 只取每周最后一天的动量行；过滤掉全 NaN 的行（窗口期不足）
+    weekly_momentum = momentum_df.loc[weekly_dates]
+    weekly_momentum = weekly_momentum.dropna(how="all")
 
-    # Step 4: 对每一行（每周），用 idxmax 找出动量最强的 ETF 代码
+    if weekly_momentum.empty:
+        return pd.DataFrame(columns=["date", "code", "name", "momentum"])
+
+    # Step 4: 向量化选取每行动量最强的 ETF
     # idxmax(axis=1) 沿列方向找最大值，返回列名（即 ETF 代码）
+    # max(axis=1) 获取对应的动量值
+    best_codes = weekly_momentum.idxmax(axis=1)
+    best_values = weekly_momentum.max(axis=1)
+
+    # 构造信号表
     signals: list[dict] = []
     for date in weekly_momentum.index:
-        row = weekly_momentum.loc[date]
-        # 跳过全为 NaN 的行（窗口期尚未满足）
-        if row.isna().all():
-            continue
-        best_code = row.idxmax()
-        best_momentum = row[best_code]
+        code = best_codes[date]
+        mom = float(best_values[date])
 
-        # 只选正动量的 ETF，若全部下跌则空仓
-        if best_momentum <= 0:
+        # 动量 <= 0 则空仓
+        if mom <= 0:
             continue
 
         signals.append({
             "date": date,
-            "code": best_code,
-            "name": ETF_POOL.get(best_code, ""),
-            "momentum": round(float(best_momentum), 4),
+            "code": code,
+            "name": ETF_POOL.get(code, ""),
+            "momentum": round(mom, 4),
         })
 
     signal_df = pd.DataFrame(signals)
