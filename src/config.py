@@ -47,25 +47,40 @@ START_DATE: str = "20160101"
 END_DATE: str = "20260509"
 
 # ---- 策略参数 ----
-# 以下为 V3 网格搜索最优参数（夏普 1.16，回撤 -6.39%）
-MOMENTUM_WINDOW: int = 10      # 动量计算窗口
-TOP_N: int = 5                 # 风险资产持仓数
+# V3 基础参数
+MOMENTUM_WINDOW: int = 10      # 单窗口动量（复合动量模式下为短期窗口）
+TOP_N: int = 5                 # 风险资产持仓数（动态仓位模式下为默认）
 USE_RISK_ADJUSTED: bool = True    # 风险调整动量（动量/波动率）
-USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤（V3最优中关闭）
+USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤
 TREND_WINDOW: int = 60         # 单ETF趋势过滤的MA窗口
+
+# 双层复合动量
+USE_COMPOSITE_MOMENTUM: bool = True          # 是否启用多周期复合动量
+MOMENTUM_WINDOWS_COMPOSITE: list[int] = [10, 30, 60]  # 短/中/长 三个周期
+MOMENTUM_WEIGHTS: list[float] = [0.5, 0.3, 0.2]       # 对应权重
+
+# 动态仓位（根据市场强弱调整持仓数）
+USE_DYNAMIC_POSITION: bool = True      # 牛市集中、熊市分散
+TOP_N_AGGRESSIVE: int = 3             # 强牛时持仓数（集中火力）
+TOP_N_NORMAL: int = 5                 # 一般市持仓数（分散防御）
+
+# 相对强弱过滤（必须跑赢基准才算有效动量）
+USE_RELATIVE_STRENGTH: bool = True     # 仅选动量 > 基准（沪深300）的 ETF
+RELATIVE_STRENGTH_BENCHMARK: str = "510300"
 
 # 大盘择时（风险/防御切换）
 MARKET_MA_WINDOW: int = 120       # 沪深300 > N日均线 → 风险资产；否则 → 防御资产
-DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]  # 防御资产优先级：国债→黄金
+MARKET_MA_AGGRESSIVE: int = 200   # 沪深300 > 此均线 → 强牛模式（动态仓位用到）
+DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 
 # 调仓频率
-REBALANCE_FREQ: int = 1        # 1=每周, 2=双周, 4=月（最优=1）
+REBALANCE_FREQ: int = 1        # 1=每周, 2=双周, 4=月
 
 # 波动率仓位控制
-USE_VOL_TARGET: bool = True       # 是否启用波动率目标仓位
-VOL_TARGET: float = 0.15       # 目标年化波动率（15%）
-VOL_LOOKBACK: int = 20         # 波动率计算回看窗口
-VOL_CAP: float = 1.5           # 单只 ETF 最大仓位倍率
+USE_VOL_TARGET: bool = True
+VOL_TARGET: float = 0.15
+VOL_LOOKBACK: int = 20
+VOL_CAP: float = 1.5
 
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比

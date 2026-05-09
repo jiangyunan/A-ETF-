@@ -37,11 +37,14 @@ TEST_DAYS = int(TEST_MONTHS / 12 * 252)  # 约 126 个交易日
 
 # 搜索空间（与 optimizer 一致，但可以缩小以加速）
 SEARCH_WINDOWS = [10, 20, 40]
-SEARCH_TOP_NS = [2, 3, 5]
+SEARCH_TOP_NS = [3, 5]
 SEARCH_RISK_ADJUSTED = [True]
-SEARCH_REBALANCE_FREQ = [1, 2, 4]
-SEARCH_MARKET_MA = [0, 60, 120, 200]
+SEARCH_REBALANCE_FREQ = [1, 2]
+SEARCH_MARKET_MA = [60, 120, 200]
 SEARCH_VOL_TARGET = [False, True]
+SEARCH_COMPOSITE = [False, True]
+SEARCH_DYNAMIC_POS = [False, True]
+SEARCH_REL_STRENGTH = [False, True]
 
 
 def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
@@ -49,14 +52,18 @@ def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
     best_sharpe = -np.inf
     best_params = {}
 
-    for window, top_n, use_ra, freq, market_ma, use_vol in product(
+    for window, top_n, use_ra, freq, market_ma, use_vol, composite, dyn_pos, rel_str in product(
         SEARCH_WINDOWS, SEARCH_TOP_NS, SEARCH_RISK_ADJUSTED,
         SEARCH_REBALANCE_FREQ, SEARCH_MARKET_MA, SEARCH_VOL_TARGET,
+        SEARCH_COMPOSITE, SEARCH_DYNAMIC_POS, SEARCH_REL_STRENGTH,
     ):
         signals = generate_weekly_signals(
             prices_is,
             window=window, top_n=top_n,
             use_risk_adjusted=use_ra,
+            use_composite_momentum=composite,
+            use_dynamic_position=dyn_pos,
+            use_relative_strength=rel_str,
             market_ma_window=market_ma,
             rebalance_freq=freq,
             use_vol_target=use_vol,
@@ -70,6 +77,9 @@ def _grid_search_fold(prices_is: pd.DataFrame, benchmark_is: pd.Series) -> dict:
             best_params = {
                 "window": window, "top_n": top_n,
                 "use_risk_adjusted": use_ra,
+                "use_composite_momentum": composite,
+                "use_dynamic_position": dyn_pos,
+                "use_relative_strength": rel_str,
                 "market_ma_window": market_ma,
                 "rebalance_freq": freq,
                 "use_vol_target": use_vol,
@@ -148,6 +158,9 @@ def run_walk_forward(verbose: bool = True) -> dict:
             window=best_params["window"],
             top_n=best_params["top_n"],
             use_risk_adjusted=best_params["use_risk_adjusted"],
+            use_composite_momentum=best_params.get("use_composite_momentum", False),
+            use_dynamic_position=best_params.get("use_dynamic_position", False),
+            use_relative_strength=best_params.get("use_relative_strength", False),
             market_ma_window=best_params["market_ma_window"],
             rebalance_freq=best_params["rebalance_freq"],
             use_vol_target=best_params["use_vol_target"],

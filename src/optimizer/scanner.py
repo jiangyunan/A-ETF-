@@ -31,11 +31,14 @@ from src.output.report import plot_equity_curve, export_to_excel
 
 # 搜索空间定义
 MOMENTUM_WINDOWS = [10, 20, 40]
-TOP_N_VALUES = [2, 3, 5]
-RISK_ADJUSTED_OPTIONS = [True]         # V3 固定用风险调整
-REBALANCE_FREQ_OPTIONS = [1, 2, 4]    # 1=周, 2=双周, 4=月
-MARKET_MA_WINDOWS = [0, 60, 120, 200] # 0=关闭, 120=推荐
+TOP_N_VALUES = [3, 5]
+RISK_ADJUSTED_OPTIONS = [True]         # 固定开
+REBALANCE_FREQ_OPTIONS = [1, 2]       # 1=周, 2=双周
+MARKET_MA_WINDOWS = [60, 120, 200]    # 0=关闭, 60/120/200=三档
 USE_VOL_TARGET_OPTIONS = [False, True]
+COMPOSITE_MOMENTUM_OPTIONS = [False, True]   # V4: 复合动量
+DYNAMIC_POSITION_OPTIONS = [False, True]     # V4: 动态仓位
+RELATIVE_STRENGTH_OPTIONS = [False, True]    # V4: 强弱过滤
 
 
 def _extract_sharpe(metrics: dict) -> float:
@@ -78,18 +81,13 @@ def run_grid_search(
         best_params: 最优参数的字典
     """
     total_combos = (
-        len(MOMENTUM_WINDOWS)
-        * len(TOP_N_VALUES)
-        * len(RISK_ADJUSTED_OPTIONS)
-        * len(REBALANCE_FREQ_OPTIONS)
-        * len(MARKET_MA_WINDOWS)
-        * len(USE_VOL_TARGET_OPTIONS)
+        len(MOMENTUM_WINDOWS) * len(TOP_N_VALUES) * len(RISK_ADJUSTED_OPTIONS)
+        * len(REBALANCE_FREQ_OPTIONS) * len(MARKET_MA_WINDOWS) * len(USE_VOL_TARGET_OPTIONS)
+        * len(COMPOSITE_MOMENTUM_OPTIONS) * len(DYNAMIC_POSITION_OPTIONS)
+        * len(RELATIVE_STRENGTH_OPTIONS)
     )
     if verbose:
-        print(f"搜索空间: {len(MOMENTUM_WINDOWS)}×{len(TOP_N_VALUES)}"
-              f"×{len(RISK_ADJUSTED_OPTIONS)}×{len(REBALANCE_FREQ_OPTIONS)}"
-              f"×{len(MARKET_MA_WINDOWS)}×{len(USE_VOL_TARGET_OPTIONS)}"
-              f" = {total_combos} 组参数")
+        print(f"搜索空间: {total_combos} 组参数 (V4)")
         print(f"优化目标: 最大化夏普比率\n")
 
     results: list[dict] = []
@@ -101,9 +99,10 @@ def run_grid_search(
 
     start_time = time.time()
 
-    for i, (window, top_n, use_ra, freq, market_ma, use_vol) in enumerate(
+    for i, (window, top_n, use_ra, freq, market_ma, use_vol, composite, dyn_pos, rel_str) in enumerate(
         product(MOMENTUM_WINDOWS, TOP_N_VALUES, RISK_ADJUSTED_OPTIONS,
-                REBALANCE_FREQ_OPTIONS, MARKET_MA_WINDOWS, USE_VOL_TARGET_OPTIONS),
+                REBALANCE_FREQ_OPTIONS, MARKET_MA_WINDOWS, USE_VOL_TARGET_OPTIONS,
+                COMPOSITE_MOMENTUM_OPTIONS, DYNAMIC_POSITION_OPTIONS, RELATIVE_STRENGTH_OPTIONS),
         start=1,
     ):
         signals = generate_weekly_signals(
@@ -111,6 +110,9 @@ def run_grid_search(
             window=window,
             top_n=top_n,
             use_risk_adjusted=use_ra,
+            use_composite_momentum=composite,
+            use_dynamic_position=dyn_pos,
+            use_relative_strength=rel_str,
             market_ma_window=market_ma,
             rebalance_freq=freq,
             use_vol_target=use_vol,
@@ -128,10 +130,12 @@ def run_grid_search(
             "排名": 0,
             "动量窗口": window,
             "持仓数": top_n,
-            "风险调整": "开" if use_ra else "关",
             "调仓频率": f"{freq}周",
             "大盘择时": f"MA{market_ma}" if market_ma > 0 else "关",
             "波动率控仓": "开" if use_vol else "关",
+            "复合动量": "开" if composite else "关",
+            "动态仓位": "开" if dyn_pos else "关",
+            "强弱过滤": "开" if rel_str else "关",
             "夏普比率": sharpe,
             "年化收益率": annual_ret,
             "最大回撤": max_dd,
@@ -141,10 +145,11 @@ def run_grid_search(
         if sharpe > best_sharpe:
             best_sharpe = sharpe
             best_params = {
-                "window": window,
-                "top_n": top_n,
+                "window": window, "top_n": top_n,
                 "use_risk_adjusted": use_ra,
-                "use_trend_filter": False,
+                "use_composite_momentum": composite,
+                "use_dynamic_position": dyn_pos,
+                "use_relative_strength": rel_str,
                 "market_ma_window": market_ma,
                 "rebalance_freq": freq,
                 "use_vol_target": use_vol,
