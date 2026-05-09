@@ -32,13 +32,11 @@ from src.output.report import plot_equity_curve, export_to_excel
 # 搜索空间定义
 MOMENTUM_WINDOWS = [10, 20, 40]
 TOP_N_VALUES = [3, 5]
-RISK_ADJUSTED_OPTIONS = [True]         # 固定开
-REBALANCE_FREQ_OPTIONS = [1, 2]       # 1=周, 2=双周
-MARKET_MA_WINDOWS = [60, 120, 200]    # 0=关闭, 60/120/200=三档
+REBALANCE_FREQ_OPTIONS = [1, 2]
+MARKET_MA_WINDOWS = [60, 120, 200]
 USE_VOL_TARGET_OPTIONS = [False, True]
-COMPOSITE_MOMENTUM_OPTIONS = [False, True]   # V4: 复合动量
-DYNAMIC_POSITION_OPTIONS = [False, True]     # V4: 动态仓位
-RELATIVE_STRENGTH_OPTIONS = [False, True]    # V4: 强弱过滤
+STATE_MACHINE_OPTIONS = [False, True]    # V5: 市场状态机
+CORRELATION_FILTER_OPTIONS = [False, True]  # V5: 相关性过滤
 
 
 def _extract_sharpe(metrics: dict) -> float:
@@ -81,13 +79,12 @@ def run_grid_search(
         best_params: 最优参数的字典
     """
     total_combos = (
-        len(MOMENTUM_WINDOWS) * len(TOP_N_VALUES) * len(RISK_ADJUSTED_OPTIONS)
-        * len(REBALANCE_FREQ_OPTIONS) * len(MARKET_MA_WINDOWS) * len(USE_VOL_TARGET_OPTIONS)
-        * len(COMPOSITE_MOMENTUM_OPTIONS) * len(DYNAMIC_POSITION_OPTIONS)
-        * len(RELATIVE_STRENGTH_OPTIONS)
+        len(MOMENTUM_WINDOWS) * len(TOP_N_VALUES) * len(REBALANCE_FREQ_OPTIONS)
+        * len(MARKET_MA_WINDOWS) * len(USE_VOL_TARGET_OPTIONS)
+        * len(STATE_MACHINE_OPTIONS) * len(CORRELATION_FILTER_OPTIONS)
     )
     if verbose:
-        print(f"搜索空间: {total_combos} 组参数 (V4)")
+        print(f"搜索空间: {total_combos} 组参数 (V5)")
         print(f"优化目标: 最大化夏普比率\n")
 
     results: list[dict] = []
@@ -99,20 +96,18 @@ def run_grid_search(
 
     start_time = time.time()
 
-    for i, (window, top_n, use_ra, freq, market_ma, use_vol, composite, dyn_pos, rel_str) in enumerate(
-        product(MOMENTUM_WINDOWS, TOP_N_VALUES, RISK_ADJUSTED_OPTIONS,
-                REBALANCE_FREQ_OPTIONS, MARKET_MA_WINDOWS, USE_VOL_TARGET_OPTIONS,
-                COMPOSITE_MOMENTUM_OPTIONS, DYNAMIC_POSITION_OPTIONS, RELATIVE_STRENGTH_OPTIONS),
+    for i, (window, top_n, freq, market_ma, use_vol, state_machine, corr_filter) in enumerate(
+        product(MOMENTUM_WINDOWS, TOP_N_VALUES, REBALANCE_FREQ_OPTIONS,
+                MARKET_MA_WINDOWS, USE_VOL_TARGET_OPTIONS,
+                STATE_MACHINE_OPTIONS, CORRELATION_FILTER_OPTIONS),
         start=1,
     ):
         signals = generate_weekly_signals(
             prices,
-            window=window,
-            top_n=top_n,
-            use_risk_adjusted=use_ra,
-            use_composite_momentum=composite,
-            use_dynamic_position=dyn_pos,
-            use_relative_strength=rel_str,
+            window=window, top_n=top_n,
+            use_risk_adjusted=True,
+            use_market_state_machine=state_machine,
+            use_correlation_filter=corr_filter,
             market_ma_window=market_ma,
             rebalance_freq=freq,
             use_vol_target=use_vol,
@@ -131,11 +126,10 @@ def run_grid_search(
             "动量窗口": window,
             "持仓数": top_n,
             "调仓频率": f"{freq}周",
-            "大盘择时": f"MA{market_ma}" if market_ma > 0 else "关",
+            "大盘择时": f"MA{market_ma}",
             "波动率控仓": "开" if use_vol else "关",
-            "复合动量": "开" if composite else "关",
-            "动态仓位": "开" if dyn_pos else "关",
-            "强弱过滤": "开" if rel_str else "关",
+            "状态机": "开" if state_machine else "关",
+            "相关性过滤": "开" if corr_filter else "关",
             "夏普比率": sharpe,
             "年化收益率": annual_ret,
             "最大回撤": max_dd,
@@ -146,10 +140,8 @@ def run_grid_search(
             best_sharpe = sharpe
             best_params = {
                 "window": window, "top_n": top_n,
-                "use_risk_adjusted": use_ra,
-                "use_composite_momentum": composite,
-                "use_dynamic_position": dyn_pos,
-                "use_relative_strength": rel_str,
+                "use_market_state_machine": state_machine,
+                "use_correlation_filter": corr_filter,
                 "market_ma_window": market_ma,
                 "rebalance_freq": freq,
                 "use_vol_target": use_vol,
@@ -176,9 +168,8 @@ def run_grid_search(
         print(f"{'='*70}")
         print(f"  动量窗口: {best_params['window']}")
         print(f"  持仓数:   {best_params['top_n']}")
-        print(f"  复合动量: {'开' if best_params.get('use_composite_momentum') else '关'}")
-        print(f"  动态仓位: {'开' if best_params.get('use_dynamic_position') else '关'}")
-        print(f"  强弱过滤: {'开' if best_params.get('use_relative_strength') else '关'}")
+        print(f"  状态机: {'开' if best_params.get('use_market_state_machine') else '关'}")
+        print(f"  相关性过滤: {'开' if best_params.get('use_correlation_filter') else '关'}")
         print(f"  大盘择时: MA{best_params['market_ma_window']}")
         print(f"  调仓频率: {best_params['rebalance_freq']}周")
         print(f"  波动率控仓: {'开' if best_params.get('use_vol_target') else '关'}")
@@ -229,14 +220,12 @@ def run_optimizer() -> None:
         # 最优组合的绩效明细
         bp = best["best_params"]
         summary = pd.DataFrame({
-            "参数": ["动量窗口", "持仓数", "复合动量", "动态仓位", "强弱过滤",
+            "参数": ["动量窗口", "持仓数", "状态机", "相关性过滤",
                     "大盘择时", "调仓频率", "波动率控仓", "夏普比率"],
             "最优值": [
-                str(bp["window"]),
-                str(bp["top_n"]),
-                "开" if bp.get("use_composite_momentum") else "关",
-                "开" if bp.get("use_dynamic_position") else "关",
-                "开" if bp.get("use_relative_strength") else "关",
+                str(bp["window"]), str(bp["top_n"]),
+                "开" if bp.get("use_market_state_machine") else "关",
+                "开" if bp.get("use_correlation_filter") else "关",
                 f"MA{bp['market_ma_window']}",
                 f"{bp['rebalance_freq']}周",
                 "开" if bp.get("use_vol_target") else "关",
@@ -261,9 +250,8 @@ def run_optimizer() -> None:
         "回测年数": "",
         "交易次数": "",
         "最优参数": (f"窗口={bp['window']} 持仓={bp['top_n']} "
-                    f"复合动量={'开' if bp.get('use_composite_momentum') else '关'} "
-                    f"动态仓位={'开' if bp.get('use_dynamic_position') else '关'} "
-                    f"强弱过滤={'开' if bp.get('use_relative_strength') else '关'} "
+                    f"状态机={'开' if bp.get('use_market_state_machine') else '关'} "
+                    f"相关过滤={'开' if bp.get('use_correlation_filter') else '关'} "
                     f"大盘择时=MA{bp['market_ma_window']}"),
     }
     export_to_excel(

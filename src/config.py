@@ -47,34 +47,44 @@ START_DATE: str = "20160101"
 END_DATE: str = "20260509"
 
 # ---- 策略参数 ----
-# V4 网格搜索最优（夏普 1.14，年化 12.18%，回撤 -11.07%）
-MOMENTUM_WINDOW: int = 20      # 动量计算窗口
-TOP_N: int = 5                 # 风险资产持仓数
+# V5: 市场状态机 + 相关性控制
+MOMENTUM_WINDOW: int = 20      # 动量计算窗口（状态机覆盖时为基础值）
+TOP_N: int = 5                 # 风险资产持仓数（状态机覆盖时为基础值）
 USE_RISK_ADJUSTED: bool = True    # 风险调整动量
 USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤
-TREND_WINDOW: int = 60           # 单ETF趋势过滤MA窗口
+TREND_WINDOW: int = 60
 
-# 双层复合动量（可选开启，稳定性>0.9）
-USE_COMPOSITE_MOMENTUM: bool = False
+# 市场状态机 — 根据趋势环境自动切换参数
+USE_MARKET_STATE_MACHINE: bool = True
+STATE_BULL_WINDOW: int = 10       # 牛市动量窗口（短=灵敏）
+STATE_BULL_TOP_N: int = 3         # 牛市持仓数（集中火力）
+STATE_SIDEWAYS_WINDOW: int = 20   # 震荡市动量窗口（中=平衡）
+STATE_SIDEWAYS_TOP_N: int = 5     # 震荡市持仓数（分散防御）
+STATE_BEAR_WINDOW: int = 40       # 熊市防御窗口（长=稳定）
+MA_TREND_SHORT: int = 20          # 短期均线（判断趋势方向）
+MA_TREND_MEDIUM: int = 60         # 中期均线（确认趋势）
+MARKET_MA_WINDOW: int = 120       # 牛熊分界线
+SYSTEM_MA_WINDOW: int = 120       # 市场整体趋势判断
 MOMENTUM_WINDOWS_COMPOSITE: list[int] = [10, 30, 60]
 MOMENTUM_WEIGHTS: list[float] = [0.5, 0.3, 0.2]
+USE_COMPOSITE_MOMENTUM: bool = False
 
-# 动态仓位（可选开启，稳定性>0.9）
-USE_DYNAMIC_POSITION: bool = False
+# 相关性控制 — 避免同质化资产集中
+USE_CORRELATION_FILTER: bool = True
+CORRELATION_WINDOW: int = 60      # 相关性计算窗口
+CORRELATION_THRESHOLD: float = 0.75  # 最大允许相关性（超过则跳过）
+
+# 其他特性开关
+USE_DYNAMIC_POSITION: bool = False   # 被状态机取代，保持兼容
 TOP_N_AGGRESSIVE: int = 3
 TOP_N_NORMAL: int = 5
-
-# 相对强弱过滤（可选开启，稳定性>0.6）
 USE_RELATIVE_STRENGTH: bool = False
 RELATIVE_STRENGTH_BENCHMARK: str = "510300"
-
-# 大盘择时
-MARKET_MA_WINDOW: int = 120
 MARKET_MA_AGGRESSIVE: int = 200
 DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 
 # 调仓频率
-REBALANCE_FREQ: int = 1        # 1=周, 2=双周（月频崩，勿用4）
+REBALANCE_FREQ: int = 1
 
 # 波动率仓位控制
 USE_VOL_TARGET: bool = True

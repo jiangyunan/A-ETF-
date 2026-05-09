@@ -22,6 +22,10 @@ from src.config import (
     USE_COMPOSITE_MOMENTUM, MOMENTUM_WINDOWS_COMPOSITE, MOMENTUM_WEIGHTS,
     USE_DYNAMIC_POSITION, TOP_N_AGGRESSIVE, TOP_N_NORMAL,
     USE_RELATIVE_STRENGTH, RELATIVE_STRENGTH_BENCHMARK,
+    USE_MARKET_STATE_MACHINE, STATE_BULL_WINDOW, STATE_BULL_TOP_N,
+    STATE_SIDEWAYS_WINDOW, STATE_SIDEWAYS_TOP_N, STATE_BEAR_WINDOW,
+    MA_TREND_SHORT, MA_TREND_MEDIUM,
+    USE_CORRELATION_FILTER, CORRELATION_WINDOW, CORRELATION_THRESHOLD,
     MARKET_MA_WINDOW, MARKET_MA_AGGRESSIVE,
     REBALANCE_FREQ,
     USE_VOL_TARGET, VOL_TARGET,
@@ -47,35 +51,43 @@ def run_single_backtest() -> None:
 
     # ---- 第二步：生成信号 ----
     print(f"\n[2/4] 生成调仓信号...")
-    print(f"      参数: 窗口={MOMENTUM_WINDOW} 持仓={TOP_N} "
-          f"复合动量={'开' if USE_COMPOSITE_MOMENTUM else '关'} "
-          f"动态仓位={'开' if USE_DYNAMIC_POSITION else '关'} "
-          f"强弱过滤={'开' if USE_RELATIVE_STRENGTH else '关'}")
+    print(f"      参数: 状态机={'开' if USE_MARKET_STATE_MACHINE else '关'} "
+          f"相关性过滤={'开' if USE_CORRELATION_FILTER else '关'} "
+          f"波动率控仓={'开' if USE_VOL_TARGET else '关'}")
     signals = generate_weekly_signals(
         prices,
-        window=MOMENTUM_WINDOW,
-        top_n=TOP_N,
+        window=MOMENTUM_WINDOW, top_n=TOP_N,
         use_risk_adjusted=USE_RISK_ADJUSTED,
         use_composite_momentum=USE_COMPOSITE_MOMENTUM,
         composite_windows=MOMENTUM_WINDOWS_COMPOSITE,
         composite_weights=MOMENTUM_WEIGHTS,
+        use_market_state_machine=USE_MARKET_STATE_MACHINE,
+        state_bull_window=STATE_BULL_WINDOW,
+        state_bull_top_n=STATE_BULL_TOP_N,
+        state_sideways_window=STATE_SIDEWAYS_WINDOW,
+        state_sideways_top_n=STATE_SIDEWAYS_TOP_N,
+        state_bear_window=STATE_BEAR_WINDOW,
+        ma_trend_short=MA_TREND_SHORT,
+        ma_trend_medium=MA_TREND_MEDIUM,
+        market_ma_window=MARKET_MA_WINDOW,
+        use_correlation_filter=USE_CORRELATION_FILTER,
+        correlation_window=CORRELATION_WINDOW,
+        correlation_threshold=CORRELATION_THRESHOLD,
         use_dynamic_position=USE_DYNAMIC_POSITION,
         top_n_aggressive=TOP_N_AGGRESSIVE,
         use_relative_strength=USE_RELATIVE_STRENGTH,
-        rs_benchmark=RELATIVE_STRENGTH_BENCHMARK,
-        market_ma_window=MARKET_MA_WINDOW,
-        market_ma_aggressive=MARKET_MA_AGGRESSIVE,
         rebalance_freq=REBALANCE_FREQ,
-        use_vol_target=USE_VOL_TARGET,
-        vol_target=VOL_TARGET,
+        use_vol_target=USE_VOL_TARGET, vol_target=VOL_TARGET,
     )
     if signals.empty:
         print("      错误：未生成任何信号，请检查数据或动量窗口设置")
         return
     print(f"      共生成 {len(signals)} 条调仓信号")
-    if 'is_defense' in signals.columns:
-        n_def = signals['is_defense'].sum()
-        print(f"      其中防御信号: {n_def} 条 ({n_def/len(signals)*100:.0f}%)")
+    if 'state' in signals.columns:
+        for st in ['BULL', 'SIDEWAYS', 'BEAR']:
+            cnt = (signals['state'] == st).sum()
+            if cnt > 0:
+                print(f"      {st}: {cnt} 条 ({cnt/len(signals)*100:.0f}%)")
     print(f"      首条: {signals.iloc[0]['date'].date()} → {signals.iloc[0]['name']}")
     print(f"      末条: {signals.iloc[-1]['date'].date()} → {signals.iloc[-1]['name']}")
 
@@ -121,21 +133,27 @@ def run_signal() -> None:
     # 生成全部信号，取最后一条
     signals = generate_weekly_signals(
         prices,
-        window=MOMENTUM_WINDOW,
-        top_n=TOP_N,
+        window=MOMENTUM_WINDOW, top_n=TOP_N,
         use_risk_adjusted=USE_RISK_ADJUSTED,
         use_composite_momentum=USE_COMPOSITE_MOMENTUM,
         composite_windows=MOMENTUM_WINDOWS_COMPOSITE,
         composite_weights=MOMENTUM_WEIGHTS,
+        use_market_state_machine=USE_MARKET_STATE_MACHINE,
+        state_bull_window=STATE_BULL_WINDOW,
+        state_bull_top_n=STATE_BULL_TOP_N,
+        state_sideways_window=STATE_SIDEWAYS_WINDOW,
+        state_sideways_top_n=STATE_SIDEWAYS_TOP_N,
+        state_bear_window=STATE_BEAR_WINDOW,
+        ma_trend_short=MA_TREND_SHORT, ma_trend_medium=MA_TREND_MEDIUM,
+        market_ma_window=MARKET_MA_WINDOW,
+        use_correlation_filter=USE_CORRELATION_FILTER,
+        correlation_window=CORRELATION_WINDOW,
+        correlation_threshold=CORRELATION_THRESHOLD,
         use_dynamic_position=USE_DYNAMIC_POSITION,
         top_n_aggressive=TOP_N_AGGRESSIVE,
         use_relative_strength=USE_RELATIVE_STRENGTH,
-        rs_benchmark=RELATIVE_STRENGTH_BENCHMARK,
-        market_ma_window=MARKET_MA_WINDOW,
-        market_ma_aggressive=MARKET_MA_AGGRESSIVE,
         rebalance_freq=REBALANCE_FREQ,
-        use_vol_target=USE_VOL_TARGET,
-        vol_target=VOL_TARGET,
+        use_vol_target=USE_VOL_TARGET, vol_target=VOL_TARGET,
     )
 
     if signals.empty:
@@ -148,13 +166,11 @@ def run_signal() -> None:
 
     print(f"\n{'=' * 60}")
     print(f"  信号日期: {latest_date.date()}")
-    is_def = latest_signals['is_defense'].iloc[0] if 'is_defense' in latest_signals.columns else False
-    mode = "🛡️ 防御模式" if is_def else "⚔️ 风险模式"
-    if USE_DYNAMIC_POSITION and not is_def:
-        mode += " (集中)" if len(latest_signals) <= 3 else " (分散)"
-    print(f"  市场模式: {mode}")
-    print(f"  策略: 复合动量={'开' if USE_COMPOSITE_MOMENTUM else '关'} "
-          f"强弱过滤={'开' if USE_RELATIVE_STRENGTH else '关'} "
+    st = latest_signals['state'].iloc[0] if 'state' in latest_signals.columns else 'UNKNOWN'
+    state_labels = {'BULL': '⚔️ 牛市 (集中)', 'SIDEWAYS': '📊 震荡 (分散)', 'BEAR': '🛡️ 熊市 (防御)'}
+    print(f"  市场状态: {state_labels.get(st, st)}")
+    print(f"  策略: 状态机={'开' if USE_MARKET_STATE_MACHINE else '关'} "
+          f"相关过滤={'开' if USE_CORRELATION_FILTER else '关'} "
           f"波动率控仓={'开' if USE_VOL_TARGET else '关'}")
     print(f"  建议持仓: {len(latest_signals)} 只 ETF")
     print(f"{'=' * 60}")
