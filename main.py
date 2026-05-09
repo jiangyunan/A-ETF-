@@ -184,6 +184,9 @@ def main() -> None:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         chart_path = os.path.join(OUTPUT_DIR, "equity_curve.png")
         plot_equity_curve(result["oos_nav"], result["benchmark_nav"], chart_path)
+    elif "--stability" in args:
+        from src.optimizer.param_stability import run_and_export_stability
+        run_and_export_stability()
     elif "--signal" in args:
         run_signal()
     else:
