@@ -4,12 +4,14 @@ ETF 动量轮动系统 V2 —— 主入口
 运行方式：
   python main.py              # 单次回测（使用 config.py 中的参数）
   python main.py --optimize   # 网格搜索最优参数
+  python main.py --signal     # 生成本周实盘信号（持仓建议）
 
 所有参数配置在 src/config.py 中统一管理。
 """
 
 import os
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -90,12 +92,63 @@ def run_single_backtest() -> None:
     print(f"{'=' * 60}")
 
 
+def run_signal() -> None:
+    """生成本周的实盘信号：只输出持仓建议，不做回测。"""
+    today = datetime.now().strftime("%Y%m%d")
+
+    print("=" * 60)
+    print("  ETF 动量轮动 V2 — 本周实盘信号")
+    print("=" * 60)
+
+    # 拉取最新数据（到今天就够，只要覆盖20日窗口）
+    print(f"\n正在拉取最新行情...")
+    prices, _ = fetch_all_etf_data(start=START_DATE, end=today)
+
+    # 生成全部信号，取最后一条
+    signals = generate_weekly_signals(
+        prices,
+        window=MOMENTUM_WINDOW,
+        top_n=TOP_N,
+        use_risk_adjusted=USE_RISK_ADJUSTED,
+        use_trend_filter=USE_TREND_FILTER,
+        trend_window=TREND_WINDOW,
+    )
+
+    if signals.empty:
+        print("\n  当前无信号（全部 ETF 下跌趋势中，建议空仓观望）")
+        return
+
+    # 取最新一期的信号
+    latest_date = signals["date"].max()
+    latest_signals = signals[signals["date"] == latest_date]
+
+    print(f"\n{'=' * 60}")
+    print(f"  信号日期: {latest_date.date()}")
+    print(f"  策略参数: 窗口={MOMENTUM_WINDOW}  |  "
+          f"风险调整={'开' if USE_RISK_ADJUSTED else '关'}  |  "
+          f"趋势过滤={'开' if USE_TREND_FILTER else '关'}")
+    print(f"  建议持仓: {len(latest_signals)} 只 ETF，各占 1/{len(latest_signals)} 仓位")
+    print(f"{'=' * 60}")
+    print(f"  {'代码':<8} {'名称':<18} {'动量得分':>8}  {'权重':>8}")
+    print(f"  {'-' * 42}")
+    for _, row in latest_signals.iterrows():
+        print(f"  {row['code']:<8} {row['name']:<18} {row['momentum']:>8.4f}  {row['weight']:>7.1%}")
+    print(f"{'=' * 60}")
+
+    # 提示
+    if not USE_RISK_ADJUSTED:
+        print("\n  提示: 当前未开启风险调整动量，建议在 config.py 中开启以提升夏普比。")
+    print(f"  下次更新: 每周最后一个交易日收盘后运行 python main.py --signal\n")
+
+
 def main() -> None:
     args = sys.argv[1:]
 
     if "--optimize" in args:
         from src.optimizer.scanner import run_optimizer
         run_optimizer()
+    elif "--signal" in args:
+        run_signal()
     else:
         run_single_backtest()
 
