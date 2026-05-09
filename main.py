@@ -200,8 +200,11 @@ def main() -> None:
         chart_path = os.path.join(OUTPUT_DIR, "equity_curve.png")
         plot_equity_curve(result["oos_nav"], result["benchmark_nav"], chart_path)
     elif "--stability" in args:
-        from src.optimizer.param_stability import run_and_export_stability
-        run_and_export_stability()
+        from src.optimizer.param_stability import run_and_export_stability_v8
+        run_and_export_stability_v8()
+    elif "--monte-carlo" in args:
+        from src.optimizer.monte_carlo import run_and_export_monte_carlo
+        run_and_export_monte_carlo()
     elif "--signal" in args:
         run_signal()
     else:
