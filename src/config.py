@@ -47,10 +47,11 @@ START_DATE: str = "20160101"
 END_DATE: str = "20260509"
 
 # ---- 策略参数 ----
-MOMENTUM_WINDOW: int = 20      # 动量计算窗口
-TOP_N: int = 3                 # 风险资产持仓数
+# 以下为 V3 网格搜索最优参数（夏普 1.16，回撤 -6.39%）
+MOMENTUM_WINDOW: int = 10      # 动量计算窗口
+TOP_N: int = 5                 # 风险资产持仓数
 USE_RISK_ADJUSTED: bool = True    # 风险调整动量（动量/波动率）
-USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤
+USE_TREND_FILTER: bool = False    # 单ETF绝对动量过滤（V3最优中关闭）
 TREND_WINDOW: int = 60         # 单ETF趋势过滤的MA窗口
 
 # 大盘择时（风险/防御切换）
@@ -58,7 +59,7 @@ MARKET_MA_WINDOW: int = 120       # 沪深300 > N日均线 → 风险资产；�
 DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]  # 防御资产优先级：国债→黄金
 
 # 调仓频率
-REBALANCE_FREQ: int = 2        # 1=每周, 2=双周, 4=月
+REBALANCE_FREQ: int = 1        # 1=每周, 2=双周, 4=月（最优=1）
 
 # 波动率仓位控制
 USE_VOL_TARGET: bool = True       # 是否启用波动率目标仓位
