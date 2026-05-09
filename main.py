@@ -150,6 +150,14 @@ def main() -> None:
     if "--optimize" in args:
         from src.optimizer.scanner import run_optimizer
         run_optimizer()
+    elif "--walk-forward" in args:
+        from src.optimizer.walk_forward import run_walk_forward
+        from src.output.report import plot_equity_curve
+        import os
+        result = run_walk_forward()
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        chart_path = os.path.join(OUTPUT_DIR, "equity_curve.png")
+        plot_equity_curve(result["oos_nav"], result["benchmark_nav"], chart_path)
     elif "--signal" in args:
         run_signal()
     else:
