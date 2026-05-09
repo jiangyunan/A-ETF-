@@ -24,6 +24,7 @@ from src.config import (
     USE_RISK_ADJUSTED,
     TREND_WINDOW,
     USE_TREND_FILTER,
+    MARKET_MA_WINDOW,
     BENCHMARK_CODE,
     OUTPUT_DIR,
 )
@@ -57,6 +58,7 @@ def run_single_backtest() -> None:
         use_risk_adjusted=USE_RISK_ADJUSTED,
         use_trend_filter=USE_TREND_FILTER,
         trend_window=TREND_WINDOW,
+        market_ma_window=MARKET_MA_WINDOW,
     )
     if signals.empty:
         print("      错误：未生成任何信号，请检查数据或动量窗口设置")
@@ -112,6 +114,7 @@ def run_signal() -> None:
         use_risk_adjusted=USE_RISK_ADJUSTED,
         use_trend_filter=USE_TREND_FILTER,
         trend_window=TREND_WINDOW,
+        market_ma_window=MARKET_MA_WINDOW,
     )
 
     if signals.empty:

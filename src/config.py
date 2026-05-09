@@ -24,16 +24,17 @@ ETF_POOL: dict[str, str] = {
 
 # ---- 回测时间 ----
 # akshare 要求日期格式为 YYYYMMDD（无分隔符）
-START_DATE: str = "20220101"
-END_DATE: str = "20250509"
+START_DATE: str = "20160101"
+END_DATE: str = "20260509"
 
 # ---- 策略参数 ----
-# 以下为网格搜索找到的最优参数（夏普比 0.57）
+# 以下为网格搜索找到的最优参数（回撤<15% + 夏普>1.0）
 MOMENTUM_WINDOW: int = 20      # 动量计算窗口：过去 N 个交易日
-TOP_N: int = 2                 # 持仓数量：每周持有前 N 名，等权分配
+TOP_N: int = 3                 # 持仓数量：每周持有前 N 名，等权分配
 USE_RISK_ADJUSTED: bool = True    # 风险调整动量（动量/波动率）— 关键优化
-USE_TREND_FILTER: bool = False    # 绝对动量趋势过滤（最优结果中关闭了）
+USE_TREND_FILTER: bool = False    # 绝对动量趋势过滤（开放式回撤已足够低）
 TREND_WINDOW: int = 60         # 趋势过滤的 MA 窗口（仅在开关打开时生效）
+MARKET_MA_WINDOW: int = 100    # 大盘择时：ETF等权均价>MA才持仓（0=关闭，100=最优）
 
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比

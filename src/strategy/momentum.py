@@ -119,6 +119,7 @@ def generate_weekly_signals(
     use_risk_adjusted: bool = False,
     use_trend_filter: bool = False,
     trend_window: int = 60,
+    market_ma_window: int = 0,
 ) -> pd.DataFrame:
     """
     生成周度调仓信号（支持 V2 所有优化参数）。
@@ -130,9 +131,11 @@ def generate_weekly_signals(
         use_risk_adjusted: 是否用风险调整动量
         use_trend_filter: 是否启用趋势过滤
         trend_window: 趋势过滤的均线窗口
+        market_ma_window: 大盘择时窗口（0=关闭）。
+            用所有 ETF 等权均价作为大盘代理，仅在均价 > MA 时生成信号
 
     Returns:
-        signals: DataFrame，包含四列：
+        signals: DataFrame，包含五列：
           - date:       信号生成日期
           - code:       被选中的 ETF 代码
           - name:       ETF 名称
@@ -140,7 +143,7 @@ def generate_weekly_signals(
           - weight:     该 ETF 在组合中的权重（等权 = 1/top_n）
 
     信号逻辑：
-      每周最后一个交易日收盘后 → 计算动量 → 过滤趋势 → 选前 N 名 → 等权持有
+      每周最后一个交易日收盘后 → 计算动量 → 过滤趋势 → 大盘择时 → 选前 N 名 → 等权持有
     """
     if prices.empty:
         return pd.DataFrame(columns=["date", "code", "name", "momentum", "weight"])
@@ -163,11 +166,25 @@ def generate_weekly_signals(
     if weekly_momentum.empty:
         return pd.DataFrame(columns=["date", "code", "name", "momentum", "weight"])
 
+    # Step 3.5: 大盘择时（可选）
+    # 用 ETF 池等权均价作为市场代理，仅在均价高于 MA 的周才保留信号
+    market_ok_dates: set | None = None
+    if market_ma_window > 0:
+        market_price = prices.mean(axis=1)  # 所有 ETF 的等权均价
+        market_ma = market_price.rolling(market_ma_window).mean()
+        market_ok_dates = set(
+            weekly_dates[market_price.loc[weekly_dates] > market_ma.loc[weekly_dates]]
+        )
+
     # Step 4: 每周选前 top_n 名（向量化）
     signals: list[dict] = []
     weight_per = 1.0 / top_n  # 等权分配
 
     for date in weekly_momentum.index:
+        # 大盘择时：市场在 MA 之下时跳过本周
+        if market_ok_dates is not None and date not in market_ok_dates:
+            continue
+
         row = weekly_momentum.loc[date].dropna()
 
         # 动量 <= 0 的排除（规避下跌趋势）
