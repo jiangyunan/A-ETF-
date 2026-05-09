@@ -4,11 +4,10 @@
 核心思路（向量化回测）：
   不需要逐日循环，而是利用 pandas 的向量化操作：
   1. 计算所有 ETF 的每日收益率矩阵
-  2. 根据信号表，将策略每天「实际持有」的 ETF 收益率取出
+  2. 根据信号表，将策略每天「实际持有」的 ETF 收益率按权重取出
   3. 累积乘积 → 策略净值曲线
 
-为什么用向量化？
-  逐日 for 循环在 3 年数据（约 750 个交易日）上也能跑，但向量化更简洁高效。
+V2 支持：多仓位等权/加权组合（持仓矩阵的每行可有多个非零权重）
 """
 
 import numpy as np
@@ -28,29 +27,34 @@ def _assign_daily_holdings(
     prices: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    将周度信号展开为每日持仓矩阵。
+    将周度信号展开为每日持仓矩阵（支持多仓位）。
 
     Args:
-        signals: 周度信号表（date, code, name, momentum）
+        signals: 周度信号表（date, code, name, momentum, weight）
         prices: 收盘价宽表
 
     Returns:
-        holdings: DataFrame，行=日期，列=ETF代码，值=0或1
+        holdings: DataFrame，行=日期，列=ETF代码
+                  每行的值 = 该 ETF 的持有权重（多仓位等权时 = 1/N）
 
     逻辑：
       以每周最后一个交易日为界，逐周分配持仓。
-      有信号的周 → 持有对应 ETF；无信号的周（全部下跌跳过）→ 空仓。
-      每次持仓从「本周最后一个交易日+1」（即下周第一个交易日）开始，
-      持续到「下周最后一个交易日」为止。
+      有信号的周 → 持有对应 ETF（多只时等权）；无信号的周 → 空仓。
     """
     all_dates = prices.index
-    holdings = pd.DataFrame(0, index=all_dates, columns=prices.columns)
+    holdings = pd.DataFrame(0.0, index=all_dates, columns=prices.columns)
 
     if signals.empty:
         return holdings
 
-    # 日期 → ETF 代码 的快速查找表
-    signal_map: dict[pd.Timestamp, str] = dict(zip(signals["date"], signals["code"]))
+    # 日期 → [(code, weight), ...] 的映射（同一日期可能有多只 ETF）
+    signal_groups: dict[pd.Timestamp, list[tuple[str, float]]] = {}
+    for _, row in signals.iterrows():
+        dt = row["date"]
+        if dt not in signal_groups:
+            signal_groups[dt] = []
+        w = float(row.get("weight", 1.0))
+        signal_groups[dt].append((row["code"], w))
 
     # 获取每周最后一个交易日（与信号生成的周划分一致）
     weekly_dates = _get_weekly_dates(all_dates)
@@ -69,11 +73,12 @@ def _assign_daily_holdings(
         else:
             end_pos = len(all_dates)
 
-        # 本周有信号才持仓，无信号则自动空仓（holdings 默认为 0）
-        if week_end in signal_map:
-            code = signal_map[week_end]
-            col_idx = holdings.columns.get_loc(code)
-            holdings.iloc[start_pos:end_pos, col_idx] = 1
+        # 本周有信号才持仓
+        if week_end in signal_groups:
+            for code, weight in signal_groups[week_end]:
+                if code in holdings.columns:
+                    col_idx = holdings.columns.get_loc(code)
+                    holdings.iloc[start_pos:end_pos, col_idx] = weight
 
     return holdings
 
