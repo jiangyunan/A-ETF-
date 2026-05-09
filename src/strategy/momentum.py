@@ -268,7 +268,6 @@ def generate_signals(
                 ef_window = state_sideways_window
                 ef_top_n = state_sideways_top_n
         elif use_dynamic_position:
-            # 旧版双态兼容
             bm = prices[BENCHMARK_CODE] if BENCHMARK_CODE in prices.columns else None
             if bm is not None and date in bm.index:
                 bm_ma = bm.rolling(market_ma_aggressive).mean()
@@ -281,7 +280,15 @@ def generate_signals(
         else:
             ef_window = window
             ef_top_n = top_n
-            state = "RISK_ON"
+            # 基础市场过滤（状态机关闭时的兜底防御）
+            if market_ma_window > 0 and BENCHMARK_CODE in prices.columns:
+                bm = prices[BENCHMARK_CODE]
+                if date in bm.index and date in bm.rolling(market_ma_window).mean().index:
+                    state = "RISK_ON" if bm.loc[date] > bm.rolling(market_ma_window).mean().loc[date] else "BEAR"
+                else:
+                    state = "RISK_ON"
+            else:
+                state = "RISK_ON"
 
         # ── 判断风险模式 ──
         if state == "BEAR":
