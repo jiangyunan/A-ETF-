@@ -213,6 +213,13 @@ def run_walk_forward(verbose: bool = True) -> dict:
         print(f"  {k}: {v}")
     print(f"  总耗时: {elapsed:.1f}s")
 
+    # 导出各折明细
+    fold_df = pd.DataFrame(fold_details)
+    excel_path = os.path.join(OUTPUT_DIR, "walk_forward_folds.xlsx")
+    os.makedirs(os.path.dirname(excel_path), exist_ok=True)
+    fold_df.to_excel(excel_path, index=False, sheet_name="各折明细")
+    print(f"\n  各折明细: {excel_path}")
+
     return {
         "oos_nav": oos_nav_final,
         "benchmark_nav": bm_nav_final,
