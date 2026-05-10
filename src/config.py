@@ -86,11 +86,20 @@ DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 # 调仓频率
 REBALANCE_FREQ: int = 1
 
-# 波动率仓位控制（V5 最优中关闭，状态机已有足够风控）
+# 波动率仓位控制 — 离散化（减少微调仓）
 USE_VOL_TARGET: bool = True
 VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
 VOL_CAP: float = 1.5
+VOL_DISCRETE: bool = True           # 离散化仓位（100%/70%/40% 三档）
+VOL_TIER_HIGH: float = 1.0          # 低波 → 满仓
+VOL_TIER_MID: float = 0.7           # 中波 → 七成仓
+VOL_TIER_LOW: float = 0.4           # 高波 → 四成仓
+
+# 实盘降摩擦
+MIN_REBALANCE_PCT: float = 0.05     # 权重变化 < 5% → 不交易（跳过微调）
+STATE_SMOOTHING: bool = False       # 状态平滑（默认关闭，收益损失过大）
+STATE_COOLDOWN: int = 2             # 状态冷却期（周数）
 
 # 溢价限制 — 连续惩罚函数（仅在 > 3% 时生效）
 # AdjustedScore = Momentum × max(0, 1 - k × premium^l)

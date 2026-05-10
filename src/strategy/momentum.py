@@ -22,6 +22,13 @@ from src.config import (
     PREMIUM_WEIGHT_DECAY,
     PREMIUM_BAN_ABSOLUTE,
     PREMIUM_IGNORE,
+    VOL_DISCRETE,
+    VOL_TIER_HIGH,
+    VOL_TIER_MID,
+    VOL_TIER_LOW,
+    MIN_REBALANCE_PCT,
+    STATE_SMOOTHING,
+    STATE_COOLDOWN,
 )
 from src.strategy.black_swan import evaluate_black_swan
 
@@ -223,6 +230,10 @@ def _get_holiday_delays(dates: pd.DatetimeIndex) -> set:
 
 def _calc_vol_scaled_weights(
     prices, selected_codes, base_weight, vol_target, vol_lookback, vol_cap, date,
+    discrete: bool = VOL_DISCRETE,
+    tier_high: float = VOL_TIER_HIGH,
+    tier_mid: float = VOL_TIER_MID,
+    tier_low: float = VOL_TIER_LOW,
 ) -> dict[str, float]:
     weights: dict[str, float] = {}
     date_pos = prices.index.get_loc(date)
@@ -238,7 +249,18 @@ def _calc_vol_scaled_weights(
             weights[code] = base_weight; continue
         realized_vol = daily_ret.std() * np.sqrt(252)
         scale = min(vol_target / realized_vol, vol_cap)
-        weights[code] = round(base_weight * scale, 4)
+        raw = base_weight * scale
+
+        if discrete:
+            # 离散化三档：100% / 70% / 40%
+            if raw >= base_weight * 0.85:
+                raw = base_weight * tier_high
+            elif raw >= base_weight * 0.55:
+                raw = base_weight * tier_mid
+            else:
+                raw = base_weight * tier_low
+
+        weights[code] = round(raw, 4)
     return weights
 
 
@@ -362,15 +384,36 @@ def generate_signals(
 
     signals: list[dict] = []
 
+    # ── 状态平滑变量 ──
+    prev_committed_state: str = "SIDEWAYS"
+    state_candidate: str | None = None
+    state_count: int = 0
+
+    # ── 最小调仓变量 ──
+    prev_weights: dict[str, float] = {}
+
     for date in rebalance_dates:
         if date not in momentum_df.index:
             continue
 
-        # ── 市场状态判断（广度增强）──
+        # ── 市场状态判断（广度增强 + 平滑）──
         if use_market_state_machine:
-            state, dyn_window, dyn_top_n = _classify_market(
+            raw_state, dyn_window, dyn_top_n = _classify_market(
                 prices, date, ma_trend_short, ma_trend_medium, market_ma_window,
             )
+            # 状态平滑：连续 N 周同一原始状态才正式切换
+            if STATE_SMOOTHING:
+                if raw_state == state_candidate:
+                    state_count += 1
+                else:
+                    state_candidate = raw_state
+                    state_count = 1
+                state = prev_committed_state if state_count < STATE_COOLDOWN else raw_state
+                if state_count >= STATE_COOLDOWN:
+                    prev_committed_state = raw_state
+            else:
+                state = raw_state
+
             if state == "BULL":
                 ef_window = state_bull_window
                 ef_top_n = state_bull_top_n
@@ -491,10 +534,22 @@ def generate_signals(
             if code in scaled_weights:
                 scaled_weights[code] = round(scaled_weights[code] * penalty, 4)
 
-        # ── 黑天鹅全局降仓（VIX 飙升 → 仓位 × risk_mult）──
+        # ── 黑天鹅全局降仓 ──
         if black_swan_risk_mult < 1.0:
             for code in scaled_weights:
                 scaled_weights[code] = round(scaled_weights[code] * black_swan_risk_mult, 4)
+
+        # ── 最小调仓阈值：权重变化 < 5% → 跳过本周 ──
+        if MIN_REBALANCE_PCT > 0 and prev_weights:
+            # 合并新旧权重字典（旧仓位可能持有新仓位没有的 ETF）
+            all_codes = set(scaled_weights.keys()) | set(prev_weights.keys())
+            max_change = 0.0
+            for c in all_codes:
+                old = prev_weights.get(c, 0.0)
+                new = scaled_weights.get(c, 0.0)
+                max_change = max(max_change, abs(new - old))
+            if max_change < MIN_REBALANCE_PCT:
+                continue  # 跳过本周，不记录信号
 
         for code in selected:
             signals.append({
@@ -506,6 +561,8 @@ def generate_signals(
                 "state": state if use_market_state_machine else ("RISK_ON" if risk_on else "BEAR"),
                 "holiday_delay": date in holiday_delays,
             })
+        # 更新上周权重用于下轮比较
+        prev_weights = scaled_weights.copy()
 
     signal_df = pd.DataFrame(signals)
     if signal_df.empty:
