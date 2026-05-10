@@ -245,6 +245,9 @@ def main() -> None:
     elif "--monte-carlo" in args:
         from src.optimizer.monte_carlo import run_and_export_monte_carlo
         run_and_export_monte_carlo()
+    elif "--attribution" in args:
+        from src.optimizer.attribution import run_and_export_attribution
+        run_and_export_attribution()
     elif "--signal" in args:
         run_signal()
     else:

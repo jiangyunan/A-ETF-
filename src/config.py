@@ -92,13 +92,15 @@ VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
 VOL_CAP: float = 1.5
 
-# 溢价限制 — 连续惩罚函数（替代硬阶梯）
-# AdjustedScore = Momentum × (1 - k × premium^l)
+# 溢价限制 — 连续惩罚函数（仅在 > 3% 时生效）
+# AdjustedScore = Momentum × max(0, 1 - k × premium^l)
 # AdjustedWeight = Weight × max(0.1, 1 - decay × premium)
+# QDII ETF（纳指/标普）常见 1~3% 溢价不受影响
 USE_PREMIUM_FILTER: bool = True
-PREMIUM_K: float = 15.0           # 动量惩罚系数 k
-PREMIUM_L: float = 2.0            # 指数 l（2=平方惩罚）
-PREMIUM_WEIGHT_DECAY: float = 12.5   # 权重线性衰减率（2%→0.75, 4%→0.5, 8%→0.1）
+PREMIUM_IGNORE: float = 0.03     # < 3% → 完全忽略
+PREMIUM_K: float = 5.0           # 动量惩罚系数 k（降低以保留 Alpha）
+PREMIUM_L: float = 2.0            # 指数 l（平方惩罚）
+PREMIUM_WEIGHT_DECAY: float = 8.0   # 权重衰减率（3%→0.76, 6%→0.52, 10%→0.20）
 PREMIUM_BAN_ABSOLUTE: float = 0.12  # >12% 绝对禁止
 
 # ---- 模块优先级 ----

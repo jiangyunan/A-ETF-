@@ -21,6 +21,7 @@ from src.config import (
     PREMIUM_L,
     PREMIUM_WEIGHT_DECAY,
     PREMIUM_BAN_ABSOLUTE,
+    PREMIUM_IGNORE,
 )
 
 
@@ -211,24 +212,19 @@ def _apply_premium_filter(
     mom_row: pd.Series,
     prem: pd.DataFrame,
     date: pd.Timestamp,
+    ignore_below: float = PREMIUM_IGNORE,
     k: float = PREMIUM_K,
     l_exp: float = PREMIUM_L,
     decay: float = PREMIUM_WEIGHT_DECAY,
     ban_absolute: float = PREMIUM_BAN_ABSOLUTE,
 ) -> tuple[pd.Series, dict[str, float]]:
     """
-    对某一天的动量行施加连续溢价惩罚。
+    连续溢价惩罚（仅 premium > 3% 生效）。
 
-    Level 1 (生存风控): premium > ban_absolute → 直接踢出
-    Level 5 (溢价辅助):
-      AdjustedScore = Momentum × max(0, 1 - k × premium^l)
-      AdjustedWeight = Weight × max(0.1, 1 - decay × premium)
-
-    连续函数比硬阶梯更平滑：
-      - 微小溢价(0.5%)几乎不受影响
-      - 温和溢价(2%)有感知但未致命
-      - 显著溢价(5%)大幅压制但未完全排除
-      - 极端溢价(>12%)绝对禁止
+    < 3% → 完全忽略（QDII ETF 常驻 1~3% 属正常）
+    ≥ 3% → AdjustedScore = Momentum × max(0, 1 - k × p^l)
+            AdjustedWeight = Weight × max(0.2, 1 - decay × p)
+    > 12% → 绝对禁止
     """
     row = mom_row.copy()
     weight_penalty: dict[str, float] = {}
@@ -243,22 +239,18 @@ def _apply_premium_filter(
         p = prem_row[code]
         if pd.isna(p):
             continue
-        if p <= 0:  # 折价是好事，不惩罚
+        if p <= ignore_below or p <= 0:
             continue
 
-        # Level 1 — 绝对禁止
         if p >= ban_absolute:
             row[code] = np.nan
             continue
 
-        # Level 5 — 连续惩罚
-        # 动量衰减: factor = max(0, 1 - k × p^l)
         momentum_factor = max(0.0, 1.0 - k * (p ** l_exp))
         if not pd.isna(row[code]):
             row[code] *= momentum_factor
 
-        # 权重衰减: factor = max(0.1, 1 - decay × p)
-        weight_factor = max(0.1, 1.0 - decay * p)
+        weight_factor = max(0.2, 1.0 - decay * p)
         if weight_factor < 1.0:
             weight_penalty[code] = weight_factor
 
