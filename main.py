@@ -253,6 +253,9 @@ def main() -> None:
         run_trade_ops()
     elif "--signal" in args:
         run_signal()
+    elif "--trade-ui" in args:
+        from src.ops.trade_ui import run_trade_ui
+        run_trade_ui()
     else:
         run_single_backtest()
 
