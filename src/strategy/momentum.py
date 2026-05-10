@@ -23,6 +23,7 @@ from src.config import (
     PREMIUM_BAN_ABSOLUTE,
     PREMIUM_IGNORE,
 )
+from src.strategy.black_swan import evaluate_black_swan
 
 
 # ─── 动量计算 ──────────────────────────────────────────────
@@ -372,6 +373,17 @@ def generate_signals(
             pool = [c for c in attack_codes if c in momentum_df.columns]
             risk_on = True
 
+        # ── 黑天鹅检测（Level 0 — 最高优先级）──
+        black_swan_risk_mult = 1.0
+        if risk_on:
+            bs = evaluate_black_swan(prices, None, date)
+            if bs["global_crash"]:
+                pool = defense_codes
+                risk_on = False
+            if bs["suspended"]:
+                pool = [c for c in pool if c not in bs["suspended"]]
+            black_swan_risk_mult = bs["risk_mult"]
+
         if not pool:
             continue
 
@@ -438,10 +450,15 @@ def generate_signals(
                         for code in scaled_weights:
                             scaled_weights[code] = round(scaled_weights[code] * 0.5, 4)
 
-        # ── 溢价仓位惩罚（4%~6% 溢价 → 仓位减半）──
+        # ── 溢价仓位惩罚 ──
         for code, penalty in weight_penalty_prem.items():
             if code in scaled_weights:
                 scaled_weights[code] = round(scaled_weights[code] * penalty, 4)
+
+        # ── 黑天鹅全局降仓（VIX 飙升 → 仓位 × risk_mult）──
+        if black_swan_risk_mult < 1.0:
+            for code in scaled_weights:
+                scaled_weights[code] = round(scaled_weights[code] * black_swan_risk_mult, 4)
 
         for code in selected:
             signals.append({
