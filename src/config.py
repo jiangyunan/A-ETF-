@@ -97,9 +97,10 @@ VOL_TIER_MID: float = 0.7           # 中波 → 七成仓
 VOL_TIER_LOW: float = 0.4           # 高波 → 四成仓
 
 # 实盘降摩擦
-MIN_REBALANCE_PCT: float = 0.05     # 权重变化 < 5% → 不交易（跳过微调）
-STATE_SMOOTHING: bool = False       # 状态平滑（默认关闭，收益损失过大）
-STATE_COOLDOWN: int = 2             # 状态冷却期（周数）
+MIN_REBALANCE_PCT: float = 0.10     # 权重变化 < 10% → 不交易（跳过微调）
+STATE_SMOOTHING: bool = False       # 状态平滑（默认关闭，会延迟状态切换）
+STATE_COOLDOWN: int = 2             # 冷却期（周数）：切换后至少保持N周
+POSITION_BUFFER: int = 2            # 持仓缓冲区：买入TopN，卖出TopN+buffer+1
 
 # 溢价限制 — 连续惩罚函数（仅在 > 3% 时生效）
 # AdjustedScore = Momentum × max(0, 1 - k × premium^l)

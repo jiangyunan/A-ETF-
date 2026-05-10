@@ -29,6 +29,7 @@ from src.config import (
     MIN_REBALANCE_PCT,
     STATE_SMOOTHING,
     STATE_COOLDOWN,
+    POSITION_BUFFER,
 )
 from src.strategy.black_swan import evaluate_black_swan
 
@@ -496,6 +497,17 @@ def generate_signals(
                 continue
 
         n_pick = min(ef_top_n, len(row))
+
+        # ── 持仓缓冲区（hysteresis）──
+        # 买入条件: Top N，卖出条件: 跌出 Top N+buffer
+        force_keep: list[str] = []
+        if POSITION_BUFFER > 0 and prev_weights:
+            for code in prev_weights:
+                if code in row.index:
+                    rank = row.rank(ascending=False)[code]
+                    if rank <= n_pick + POSITION_BUFFER:
+                        force_keep.append(code)
+
         top = row.nlargest(max(n_pick * 2, n_pick))  # 多取一些给相关性过滤留余量
 
         # ── 相关性过滤 ──
@@ -504,6 +516,10 @@ def generate_signals(
             selected = _filter_by_correlation(
                 selected, prices, date, correlation_window, correlation_threshold,
             )
+        # 缓冲区优先：force_keep 的 ETF 确保入选
+        for code in force_keep:
+            if code not in selected and code in row.index:
+                selected.insert(0, code)  # 排到最前面
         selected = selected[:n_pick]
 
         # ── 波动率仓位 ──
