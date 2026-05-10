@@ -219,10 +219,13 @@ def run_signal() -> None:
         print(f"  {row['code']:<8} {row['name']:<18} {row['momentum']:>8.4f}  {row['weight']:>7.1%}")
     print(f"{'=' * 60}")
 
-    # 提示
-    if not USE_RISK_ADJUSTED:
-        print("\n  提示: 当前未开启风险调整动量，建议在 config.py 中开启以提升夏普比。")
-    print(f"  下次更新: 每周最后一个交易日收盘后运行 python main.py --signal\n")
+    # 执行提示
+    is_holiday = latest_signals["holiday_delay"].iloc[0] if "holiday_delay" in latest_signals.columns else False
+    if is_holiday:
+        print(f"\n  ⚠️ 长假后首个交易日 — 明日仅观察，后天执行")
+    else:
+        print(f"\n  📅 执行日: 下一交易日（信号日+1）")
+    print(f"  下次更新: 下周一收盘后运行 python main.py --signal\n")
 
 
 def main() -> None:
@@ -253,7 +256,7 @@ def main() -> None:
         run_trade_ops()
     elif "--signal" in args:
         run_signal()
-    elif "--trade-ui" in args:
+    elif "--trade-ui" in args or "--track-ui" in args:
         from src.ops.trade_ui import run_trade_ui
         run_trade_ui()
     else:

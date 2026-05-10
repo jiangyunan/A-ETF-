@@ -174,15 +174,50 @@ def _filter_by_correlation(
     return kept
 
 
-# ─── 辅助 ────────────────────────────────────────────────────
+# ─── 调仓日期（实盘规则）──────────────────────────────────────
 
 def _get_rebalance_dates(dates: pd.DatetimeIndex, freq: int) -> pd.DatetimeIndex:
+    """
+    按实盘规则提取信号生成日期。
+
+    规则: 每周第一个交易日收盘后生成信号
+      - 通常 = 周一收盘
+      - 周一休市 → 周二收盘
+      - 长假后（3天以上休市）→ 开市第一天仅观察，第二天执行
+
+    Returns:
+        信号日期序列（每个调仓周期的第一天）
+    """
     iso = dates.isocalendar()
     df = pd.DataFrame({"date": dates, "year": iso["year"], "week": iso["week"]})
-    weekly = df.groupby(["year", "week"])["date"].max()
-    vals = weekly.values
+    # 每周第一个交易日（通常是周一）
+    weekly_first = df.groupby(["year", "week"])["date"].min()
+    vals = weekly_first.values
+
     if freq == 1:
         return pd.DatetimeIndex(vals)
+    return pd.DatetimeIndex([vals[i] for i in range(0, len(vals), freq)])
+
+
+def _get_holiday_delays(dates: pd.DatetimeIndex) -> set:
+    """
+    检测长假：连续 3 天以上无交易 → 假期后的第一个调仓日需要延迟执行。
+
+    规则: 上次交易日距今 >= 3 个自然日 → 长假，第一天仅观察不执行。
+
+    Returns:
+        需要延迟执行（跳过第一个交易日）的信号日期集合
+    """
+    delay_dates: set = set()
+    if len(dates) < 2:
+        return delay_dates
+
+    for i in range(1, len(dates)):
+        gap = (dates[i] - dates[i - 1]).days
+        if gap >= 5:  # 自然日间隔 >=5 天（如周五→下周二=4天自然日，实际只休2天）
+            delay_dates.add(dates[i])
+
+    return delay_dates
     return pd.DatetimeIndex([vals[i] for i in range(0, len(vals), freq)])
 
 
@@ -317,8 +352,9 @@ def generate_signals(
                 (momentum_df[col] > bm_mom) & (bm_mom > 0)
             )
 
-    # ── 调仓日期 ──
+    # ── 调仓日期 + 长假检测 ──
     rebalance_dates = _get_rebalance_dates(prices.index, rebalance_freq)
+    holiday_delays = _get_holiday_delays(prices.index)
 
     # ── 资产池 ──
     attack_codes = [c for c in ETF_POOL if c not in DEFENSE_ETF_CODES]
@@ -468,6 +504,7 @@ def generate_signals(
                 "momentum": round(float(top.get(code, 0)), 4),
                 "weight": round(scaled_weights.get(code, base_weight), 4),
                 "state": state if use_market_state_machine else ("RISK_ON" if risk_on else "BEAR"),
+                "holiday_delay": date in holiday_delays,
             })
 
     signal_df = pd.DataFrame(signals)

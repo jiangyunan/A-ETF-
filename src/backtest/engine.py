@@ -27,19 +27,12 @@ def _assign_daily_holdings(
     prices: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    将周度信号展开为每日持仓矩阵（支持多仓位）。
+    将信号展开为每日持仓矩阵（实盘规则）。
 
-    Args:
-        signals: 周度信号表（date, code, name, momentum, weight）
-        prices: 收盘价宽表
-
-    Returns:
-        holdings: DataFrame，行=日期，列=ETF代码
-                  每行的值 = 该 ETF 的持有权重（多仓位等权时 = 1/N）
-
-    逻辑：
-      以每周最后一个交易日为界，逐周分配持仓。
-      有信号的周 → 持有对应 ETF（多只时等权）；无信号的周 → 空仓。
+    执行规则:
+      - 普通周: 周一收盘生成信号 → 周二执行（signal_date + 1）
+      - 周一休市: 周二信号 → 周三执行
+      - 长假后: 第一天信号 → 第二天执行（holiday_delay=True → +2交易日）
     """
     all_dates = prices.index
     holdings = pd.DataFrame(0.0, index=all_dates, columns=prices.columns)
@@ -47,38 +40,45 @@ def _assign_daily_holdings(
     if signals.empty:
         return holdings
 
-    # 日期 → [(code, weight), ...] 的映射（同一日期可能有多只 ETF）
+    # 日期 → [(code, weight), ...]
     signal_groups: dict[pd.Timestamp, list[tuple[str, float]]] = {}
+    holiday_delay_set: set = set()
     for _, row in signals.iterrows():
         dt = row["date"]
         if dt not in signal_groups:
             signal_groups[dt] = []
         w = float(row.get("weight", 1.0))
         signal_groups[dt].append((row["code"], w))
+        if row.get("holiday_delay", False):
+            holiday_delay_set.add(dt)
 
-    # 获取每周最后一个交易日（与信号生成的周划分一致）
-    weekly_dates = _get_weekly_dates(all_dates)
+    signal_dates = sorted(signal_groups.keys())
 
-    for i in range(len(weekly_dates)):
-        week_end = weekly_dates[i]
+    for i, sig_date in enumerate(signal_dates):
+        if sig_date not in all_dates:
+            continue
 
-        # 持有期从本周最后一个交易日之后开始
-        start_pos = all_dates.get_loc(week_end) + 1
+        # 执行日 = 信号日 + 1（正常）或 + 2（长假后）
+        sig_pos = all_dates.get_loc(sig_date)
+        delay = 2 if sig_date in holiday_delay_set else 1
+        start_pos = sig_pos + delay
         if start_pos >= len(all_dates):
             continue
 
-        # 持有期到下周最后一个交易日为止
-        if i + 1 < len(weekly_dates):
-            end_pos = all_dates.get_loc(weekly_dates[i + 1])
+        # 持有期: 到下一个信号日（或到数据末尾）
+        if i + 1 < len(signal_dates):
+            next_date = signal_dates[i + 1]
+            if next_date in all_dates:
+                end_pos = all_dates.get_loc(next_date) + (2 if next_date in holiday_delay_set else 1)
+            else:
+                end_pos = len(all_dates)
         else:
             end_pos = len(all_dates)
 
-        # 本周有信号才持仓
-        if week_end in signal_groups:
-            for code, weight in signal_groups[week_end]:
-                if code in holdings.columns:
-                    col_idx = holdings.columns.get_loc(code)
-                    holdings.iloc[start_pos:end_pos, col_idx] = weight
+        for code, weight in signal_groups[sig_date]:
+            if code in holdings.columns:
+                col_idx = holdings.columns.get_loc(code)
+                holdings.iloc[start_pos:end_pos, col_idx] = weight
 
     return holdings
 
