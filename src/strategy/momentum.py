@@ -17,6 +17,9 @@ from src.config import (
     DEFENSE_ETF_CODES,
     MOMENTUM_WINDOW,
     VOL_LOOKBACK,
+    PREMIUM_REDUCE,
+    PREMIUM_HALVE,
+    PREMIUM_BAN,
 )
 
 
@@ -201,6 +204,64 @@ def _calc_vol_scaled_weights(
     return weights
 
 
+# ─── 溢价过滤 ──────────────────────────────────────────────
+
+def _apply_premium_filter(
+    mom_row: pd.Series,
+    prem: pd.DataFrame,
+    date: pd.Timestamp,
+    prem_reduce: float = PREMIUM_REDUCE,
+    prem_halve: float = PREMIUM_HALVE,
+    prem_ban: float = PREMIUM_BAN,
+) -> tuple[pd.Series, dict[str, float]]:
+    """
+    对某一天的动量行施加溢价惩罚。
+
+    Args:
+        mom_row: 当天的 ETF 动量 Series（index=ETF代码, value=动量值）
+        prem: 溢价率宽表（索引=日期, 列=ETF代码）
+        date: 当前调仓日
+        prem_reduce/halve/ban: 阈值
+
+    Returns:
+        row: 修正后的动量行
+        weight_penalty: {code: penalty_factor} 仓位倍率
+
+    分级：
+      |premium| < 2%        → 正常
+      2% <= |premium| < 4%  → 动量分 × 0.5
+      4% <= |premium| < 6%  → 仓位 × 0.5
+      |premium| >= 6%        → 踢出候选
+    """
+    row = mom_row.copy()
+    weight_penalty: dict[str, float] = {}
+
+    if prem.empty or date not in prem.index:
+        return row, weight_penalty
+
+    prem_row = prem.loc[date]
+    for code in row.index:
+        if code not in prem_row.index:
+            continue
+        p = prem_row[code]
+        if pd.isna(p):
+            continue
+
+        # 仅惩罚溢价（正数=溢价交易，负数=折价交易是好事）
+        if p <= 0:
+            continue
+
+        if p >= prem_ban:
+            row[code] = np.nan
+        elif p >= prem_halve:
+            weight_penalty[code] = 0.5
+        elif p >= prem_reduce:
+            if not pd.isna(row[code]):
+                row[code] *= 0.5
+
+    return row, weight_penalty
+
+
 # ─── 主信号生成 ──────────────────────────────────────────────
 
 def generate_signals(
@@ -233,9 +294,10 @@ def generate_signals(
     vol_target: float = 0.15,
     vol_lookback: int = VOL_LOOKBACK,
     vol_cap: float = 1.5,
+    premium_data: pd.DataFrame | None = None,
     **kwargs,
 ) -> pd.DataFrame:
-    """生成调仓信号（V5 状态机+相关性控制）。"""
+    """生成调仓信号（V5 状态机+相关性控制+溢价过滤）。"""
     if prices.empty:
         return pd.DataFrame(columns=["date", "code", "name", "momentum", "weight", "state"])
 
@@ -338,6 +400,15 @@ def generate_signals(
         if row.empty:
             continue
 
+        # ── 溢价过滤 ──
+        weight_penalty_prem: dict[str, float] = {}
+        if premium_data is not None and not premium_data.empty:
+            row, weight_penalty_prem = _apply_premium_filter(row, premium_data, date)
+            row = row.dropna()
+            row = row[row > 0]
+            if row.empty:
+                continue
+
         n_pick = min(ef_top_n, len(row))
         top = row.nlargest(max(n_pick * 2, n_pick))  # 多取一些给相关性过滤留余量
 
@@ -368,9 +439,14 @@ def generate_signals(
                 hist_vol = pool_vol.loc[:date].dropna()
                 if len(hist_vol) > vol_lookback * 2:
                     pct_rank = (hist_vol.iloc[-vol_lookback:].mean() > hist_vol).mean()
-                    if pct_rank > 0.90:  # 当前波动率 > 历史90%的时期
+                    if pct_rank > 0.90:
                         for code in scaled_weights:
                             scaled_weights[code] = round(scaled_weights[code] * 0.5, 4)
+
+        # ── 溢价仓位惩罚（4%~6% 溢价 → 仓位减半）──
+        for code, penalty in weight_penalty_prem.items():
+            if code in scaled_weights:
+                scaled_weights[code] = round(scaled_weights[code] * penalty, 4)
 
         for code in selected:
             signals.append({

@@ -92,6 +92,12 @@ VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
 VOL_CAP: float = 1.5
 
+# 溢价限制 — 防止买入高溢价 ETF（溢价回归时亏损）
+USE_PREMIUM_FILTER: bool = True
+PREMIUM_REDUCE: float = 0.02     # >2% → 动量分减半
+PREMIUM_HALVE: float = 0.04      # >4% → 仓位减半
+PREMIUM_BAN: float = 0.06        # >6% → 禁止买入
+
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比
 

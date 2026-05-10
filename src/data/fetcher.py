@@ -190,3 +190,65 @@ def fetch_all_etf_data(
         benchmark = pd.Series(dtype=float)
 
     return prices, benchmark
+
+
+def fetch_etf_nav(
+    codes: list[str] | None = None,
+    start: str = START_DATE,
+    end: str = END_DATE,
+) -> pd.DataFrame:
+    """
+    拉取 ETF 历史单位净值（用于溢价计算）。
+
+    Args:
+        codes: ETF 代码列表，默认取 ETF_POOL 的全部
+        start/end: 日期范围
+
+    Returns:
+        nav: DataFrame，行=净值日期，列=ETF代码，值=单位净值
+
+    使用方式：
+        nav = fetch_etf_nav()
+        premium = (price / nav.shift(1) - 1) × 100  # 前一交易日净值
+    """
+    if codes is None:
+        codes = list(ETF_POOL.keys())
+
+    nav_series = {}
+    for code in codes:
+        cache_path = os.path.join(CACHE_DIR, f"{code}_nav.csv")
+
+        # 检查缓存
+        if os.path.exists(cache_path):
+            df = pd.read_csv(cache_path, parse_dates=["净值日期"])
+            if not df.empty:
+                s = df.set_index("净值日期")["单位净值"].rename(code)
+                nav_series[code] = s
+                continue
+
+        # 拉取净值历史
+        try:
+            df = ak.fund_etf_fund_info_em(fund=code)
+            if df is None or df.empty:
+                continue
+            df = df[["净值日期", "单位净值"]].copy()
+            df["净值日期"] = pd.to_datetime(df["净值日期"])
+            df = df[(df["净值日期"] >= datetime.strptime(start, "%Y%m%d"))
+                    & (df["净值日期"] <= datetime.strptime(end, "%Y%m%d"))]
+
+            # 缓存
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            df.to_csv(cache_path, index=False)
+
+            s = df.set_index("净值日期")["单位净值"].rename(code)
+            nav_series[code] = s
+        except Exception as e:
+            print(f"[警告] 净值拉取失败 {code}: {e}")
+
+    if not nav_series:
+        return pd.DataFrame()
+
+    nav = pd.concat(nav_series.values(), axis=1)
+    nav = nav.sort_index()
+    nav = nav.ffill(limit=5)
+    return nav

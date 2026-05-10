@@ -15,6 +15,8 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import pandas as pd
+
 from src.config import (
     ETF_POOL, START_DATE, END_DATE,
     MOMENTUM_WINDOW, TOP_N, USE_RISK_ADJUSTED,
@@ -29,9 +31,10 @@ from src.config import (
     MARKET_MA_WINDOW, MARKET_MA_AGGRESSIVE,
     REBALANCE_FREQ,
     USE_VOL_TARGET, VOL_TARGET,
+    USE_PREMIUM_FILTER,
     BENCHMARK_CODE, OUTPUT_DIR,
 )
-from src.data.fetcher import fetch_all_etf_data
+from src.data.fetcher import fetch_all_etf_data, fetch_etf_nav
 from src.strategy.momentum import generate_weekly_signals
 from src.backtest.engine import run_backtest
 from src.output.report import plot_equity_curve, export_to_excel
@@ -53,7 +56,21 @@ def run_single_backtest() -> None:
     print(f"\n[2/4] 生成调仓信号...")
     print(f"      参数: 状态机={'开' if USE_MARKET_STATE_MACHINE else '关'} "
           f"相关性过滤={'开' if USE_CORRELATION_FILTER else '关'} "
-          f"波动率控仓={'开' if USE_VOL_TARGET else '关'}")
+          f"波动率控仓={'开' if USE_VOL_TARGET else '关'}"
+          f"溢价过滤={'开' if USE_PREMIUM_FILTER else '关'}")
+
+    # 溢价数据（从净值历史计算）
+    premium_data = None
+    if USE_PREMIUM_FILTER:
+        try:
+            nav = fetch_etf_nav()
+            if not nav.empty and BENCHMARK_CODE in prices.columns:
+                # 溢价率 = (收盘价 / 前一日净值 - 1)
+                nav_aligned = nav.reindex(prices.index, method="ffill")
+                premium_data = (prices / nav_aligned.shift(1) - 1).fillna(0)
+        except Exception as e:
+            print(f"      溢价数据获取失败（跳过过滤）: {e}")
+
     signals = generate_weekly_signals(
         prices,
         window=MOMENTUM_WINDOW, top_n=TOP_N,
@@ -78,6 +95,7 @@ def run_single_backtest() -> None:
         use_relative_strength=USE_RELATIVE_STRENGTH,
         rebalance_freq=REBALANCE_FREQ,
         use_vol_target=USE_VOL_TARGET, vol_target=VOL_TARGET,
+        premium_data=premium_data,
     )
     if signals.empty:
         print("      错误：未生成任何信号，请检查数据或动量窗口设置")
@@ -129,6 +147,27 @@ def run_signal() -> None:
     print(f"\n正在拉取最新行情...")
     prices, _ = fetch_all_etf_data(start=START_DATE, end=today)
 
+    # 实时溢价数据
+    premium_data = None
+    if USE_PREMIUM_FILTER:
+        try:
+            import akshare as ak
+            spot = ak.fund_etf_spot_em()
+            if '基金折价率' in spot.columns and '代码' in spot.columns:
+                spot_map = dict(zip(spot['代码'], spot['基金折价率']))
+                # 转为按代码索引的 Series（溢价率 = 负的折价率，或直接用折价率绝对值）
+                prem_series = pd.Series({c: abs(float(spot_map.get(c, 0))) / 100
+                                         for c in prices.columns
+                                         if c in spot_map},
+                                        dtype=float)
+                if not prem_series.empty:
+                    # 构造一个虚拟的 premium DataFrame（用最新日期）
+                    today_dt = pd.Timestamp(today)
+                    premium_data = pd.DataFrame([prem_series], index=[today_dt])
+                    print(f"      实时溢价: {len(prem_series)} 只 ETF")
+        except Exception as e:
+            print(f"      溢价数据获取失败: {e}")
+
     # 生成全部信号，取最后一条
     signals = generate_weekly_signals(
         prices,
@@ -153,6 +192,7 @@ def run_signal() -> None:
         use_relative_strength=USE_RELATIVE_STRENGTH,
         rebalance_freq=REBALANCE_FREQ,
         use_vol_target=USE_VOL_TARGET, vol_target=VOL_TARGET,
+        premium_data=premium_data,
     )
 
     if signals.empty:
