@@ -17,9 +17,10 @@ from src.config import (
     DEFENSE_ETF_CODES,
     MOMENTUM_WINDOW,
     VOL_LOOKBACK,
-    PREMIUM_REDUCE,
-    PREMIUM_HALVE,
-    PREMIUM_BAN,
+    PREMIUM_K,
+    PREMIUM_L,
+    PREMIUM_WEIGHT_DECAY,
+    PREMIUM_BAN_ABSOLUTE,
 )
 
 
@@ -210,28 +211,24 @@ def _apply_premium_filter(
     mom_row: pd.Series,
     prem: pd.DataFrame,
     date: pd.Timestamp,
-    prem_reduce: float = PREMIUM_REDUCE,
-    prem_halve: float = PREMIUM_HALVE,
-    prem_ban: float = PREMIUM_BAN,
+    k: float = PREMIUM_K,
+    l_exp: float = PREMIUM_L,
+    decay: float = PREMIUM_WEIGHT_DECAY,
+    ban_absolute: float = PREMIUM_BAN_ABSOLUTE,
 ) -> tuple[pd.Series, dict[str, float]]:
     """
-    对某一天的动量行施加溢价惩罚。
+    对某一天的动量行施加连续溢价惩罚。
 
-    Args:
-        mom_row: 当天的 ETF 动量 Series（index=ETF代码, value=动量值）
-        prem: 溢价率宽表（索引=日期, 列=ETF代码）
-        date: 当前调仓日
-        prem_reduce/halve/ban: 阈值
+    Level 1 (生存风控): premium > ban_absolute → 直接踢出
+    Level 5 (溢价辅助):
+      AdjustedScore = Momentum × max(0, 1 - k × premium^l)
+      AdjustedWeight = Weight × max(0.1, 1 - decay × premium)
 
-    Returns:
-        row: 修正后的动量行
-        weight_penalty: {code: penalty_factor} 仓位倍率
-
-    分级：
-      |premium| < 2%        → 正常
-      2% <= |premium| < 4%  → 动量分 × 0.5
-      4% <= |premium| < 6%  → 仓位 × 0.5
-      |premium| >= 6%        → 踢出候选
+    连续函数比硬阶梯更平滑：
+      - 微小溢价(0.5%)几乎不受影响
+      - 温和溢价(2%)有感知但未致命
+      - 显著溢价(5%)大幅压制但未完全排除
+      - 极端溢价(>12%)绝对禁止
     """
     row = mom_row.copy()
     weight_penalty: dict[str, float] = {}
@@ -246,18 +243,24 @@ def _apply_premium_filter(
         p = prem_row[code]
         if pd.isna(p):
             continue
-
-        # 仅惩罚溢价（正数=溢价交易，负数=折价交易是好事）
-        if p <= 0:
+        if p <= 0:  # 折价是好事，不惩罚
             continue
 
-        if p >= prem_ban:
+        # Level 1 — 绝对禁止
+        if p >= ban_absolute:
             row[code] = np.nan
-        elif p >= prem_halve:
-            weight_penalty[code] = 0.5
-        elif p >= prem_reduce:
-            if not pd.isna(row[code]):
-                row[code] *= 0.5
+            continue
+
+        # Level 5 — 连续惩罚
+        # 动量衰减: factor = max(0, 1 - k × p^l)
+        momentum_factor = max(0.0, 1.0 - k * (p ** l_exp))
+        if not pd.isna(row[code]):
+            row[code] *= momentum_factor
+
+        # 权重衰减: factor = max(0.1, 1 - decay × p)
+        weight_factor = max(0.1, 1.0 - decay * p)
+        if weight_factor < 1.0:
+            weight_penalty[code] = weight_factor
 
     return row, weight_penalty
 

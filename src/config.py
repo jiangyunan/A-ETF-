@@ -92,11 +92,21 @@ VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
 VOL_CAP: float = 1.5
 
-# 溢价限制 — 防止买入高溢价 ETF（溢价回归时亏损）
+# 溢价限制 — 连续惩罚函数（替代硬阶梯）
+# AdjustedScore = Momentum × (1 - k × premium^l)
+# AdjustedWeight = Weight × max(0.1, 1 - decay × premium)
 USE_PREMIUM_FILTER: bool = True
-PREMIUM_REDUCE: float = 0.02     # >2% → 动量分减半
-PREMIUM_HALVE: float = 0.04      # >4% → 仓位减半
-PREMIUM_BAN: float = 0.06        # >6% → 禁止买入
+PREMIUM_K: float = 15.0           # 动量惩罚系数 k
+PREMIUM_L: float = 2.0            # 指数 l（2=平方惩罚）
+PREMIUM_WEIGHT_DECAY: float = 12.5   # 权重线性衰减率（2%→0.75, 4%→0.5, 8%→0.1）
+PREMIUM_BAN_ABSOLUTE: float = 0.12  # >12% 绝对禁止
+
+# ---- 模块优先级 ----
+# Level 1  生存风控    → 溢价 > 12% 直接踢出
+# Level 2  极端波动    → 波动率 > 90分位 → 仓位 × 0.5
+# Level 3  状态机      → 判断牛/震/熊 → 选池 + 定窗口/持仓数
+# Level 4  动量        → 风险调整动量 → 排名选前 N
+# Level 5  溢价辅助    → 连续惩罚动量分 + 衰减权重
 
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比
