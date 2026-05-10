@@ -248,6 +248,9 @@ def main() -> None:
     elif "--attribution" in args:
         from src.optimizer.attribution import run_and_export_attribution
         run_and_export_attribution()
+    elif "--track" in args:
+        from src.ops.trade_log import run_trade_ops
+        run_trade_ops()
     elif "--signal" in args:
         run_signal()
     else:
