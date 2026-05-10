@@ -254,8 +254,9 @@ def main() -> None:
     elif "--track" in args:
         from src.ops.trade_log import run_trade_ops
         run_trade_ops()
-    elif "--signal" in args:
-        run_signal()
+    elif "--trade-source" in args:
+        from src.optimizer.trade_source import run_and_export_trade_source
+        run_and_export_trade_source()
     elif "--trade-ui" in args or "--track-ui" in args:
         from src.ops.trade_ui import run_trade_ui
         run_trade_ui()
