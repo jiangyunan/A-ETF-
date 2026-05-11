@@ -273,8 +273,102 @@ def run_signal() -> None:
     print(f"  下次更新: 下周一收盘后运行 python main.py --signal\n")
 
 
+def _check_data_freshness() -> bool:
+    """
+    检查最新K线数据是否新鲜。
+    允许周五→周一间隙（3天=正常周末），超过则报警。
+    """
+    from datetime import datetime
+    now = datetime.now()
+
+    try:
+        prices, _ = fetch_all_etf_data(
+            start=(now.replace(year=now.year - 1)).strftime("%Y%m%d"),
+            end=now.strftime("%Y%m%d"),
+        )
+    except Exception as e:
+        print(f"\n  ❌ 数据获取失败: {e}")
+        return False
+
+    if prices.empty:
+        print(f"\n  ❌ 无可用K线数据")
+        return False
+
+    latest_kline = prices.index[-1].to_pydatetime()
+    days_behind = (now - latest_kline).days
+
+    # 计算缺失的交易日（跳过周末）
+    missing_trading = 0
+    d = latest_kline
+    while d < now:
+        d = d + pd.Timedelta(days=1)
+        if d.weekday() < 5 and d < now:  # Mon-Fri, 且不能是未来
+            missing_trading += 1
+
+    weekdays_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    wd = weekdays_cn[latest_kline.weekday()]
+
+    print(f"\n  {'=' * 40}")
+    print(f"  当前时间: {now.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  最新K线:  {latest_kline.strftime('%Y-%m-%d')} ({wd})")
+
+    # 周一前的最新数据是上周五 → 正常（周末无交易）
+    if missing_trading <= 1:
+        print(f"  ✅ 数据正常")
+        print(f"  {'=' * 40}")
+        return True
+
+    print(f"  ❌ 数据缺失 {missing_trading} 个交易日 ({days_behind} 自然日)")
+    if missing_trading >= 3:
+        print(f"  🛑 超过3个交易日，建议停止交易")
+        print(f"  {'=' * 40}")
+        return False
+    else:
+        print(f"  ⚠️  {days_behind} 天未更新，可能是假期或数据源延迟")
+        print(f"  {'=' * 40}")
+        return True  # 1-2天落后可能是假期
+
+    if prices.empty:
+        print(f"\n  ❌ 无可用K线数据")
+        return False
+
+    latest_kline = prices.index[-1].to_pydatetime()
+    days_behind = (now - latest_kline).days
+
+    # 计算缺失的交易日（跳过周末）
+    missing_trading = 0
+    d = latest_kline
+    while d.date() < now.date():
+        d = d + pd.Timedelta(days=1)
+        if d.weekday() < 5:  # Mon-Fri
+            missing_trading += 1
+    # 排除今天（可能还没收盘）
+    if missing_trading > 0:
+        missing_trading -= 1
+
+    print(f"\n  {'=' * 40}")
+    print(f"  当前时间: {now.strftime('%Y-%m-%d %H:%M')}")
+    weekdays_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    wd = weekdays_cn[latest_kline.weekday()]
+    print(f"  最新K线:  {latest_kline.strftime('%Y-%m-%d')} ({wd})")
+
+    if days_behind <= max_stale_days:
+        print(f"  ✅ 数据正常")
+        print(f"  {'=' * 40}")
+        return True
+    else:
+        print(f"  ❌ 数据缺失 {missing_trading} 个交易日 ({days_behind} 自然日)")
+        print(f"  🛑 建议停止交易，等待数据更新")
+        print(f"  {'=' * 40}")
+        return False
+
+
 def main() -> None:
     args = sys.argv[1:]
+
+    # ── 数据新鲜度检查（每次运行前）──
+    if not _check_data_freshness():
+        return
 
     if "--optimize" in args:
         from src.optimizer.scanner import run_optimizer
