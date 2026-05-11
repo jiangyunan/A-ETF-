@@ -475,6 +475,9 @@ def main() -> None:
     elif "--trade-source" in args:
         from src.optimizer.trade_source import run_and_export_trade_source
         run_and_export_trade_source()
+    elif "--transition" in args:
+        from src.optimizer.transition import run_transition_analytics
+        run_transition_analytics()
     elif "--trade-ui" in args or "--track-ui" in args:
         from src.ops.trade_ui import run_trade_ui
         run_trade_ui()

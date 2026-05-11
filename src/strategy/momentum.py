@@ -39,6 +39,9 @@ from src.config import (
     MIN_WEIGHT_THRESHOLD,
     USE_TREND_FILTER_WEIGHT,
     CASH_EQUIVALENT_CODE,
+    RECOVERY_WINDOW,
+    RECOVERY_TOP_N,
+    RECOVERY_MAX_WEIGHT,
 )
 from src.strategy.black_swan import evaluate_black_swan
 
@@ -99,16 +102,15 @@ def _market_breadth(prices: pd.DataFrame, date: pd.Timestamp, window: int = 60) 
 def _classify_market(
     prices: pd.DataFrame, date: pd.Timestamp,
     ma_trend_short: int = 20, ma_trend_medium: int = 60, ma_market: int = 120,
+    prev_state: str = "SIDEWAYS",
 ) -> tuple[str, int, int]:
     """
-    三态判断：牛市/震荡/熊市，融入广度辅助。
+    四态判断：BULL / RECOVERY / SIDEWAYS / BEAR。
 
-    牛市: 广度 > 0.6 且 MA20 > MA60 且 CSI300 > MA120
-          → 短窗口(10天)、集中持仓(3只)
-    震荡: CSI300 > MA120 且 广度 > 0.4，但趋势不够强
-          → 中窗口(20天)、分散持仓(5只)
-    熊市: CSI300 < MA120 或 广度 < 0.4（任一触发即防御）
-          → 防御模式
+    BULL:      广度 > 0.6 + MA20>MA60 + CSI300>MA120 → 集中进攻
+    RECOVERY:  刚从BEAR恢复 + CSI300>MA120 + 广度>0.25 → 试探性进攻
+    SIDEWAYS:  CSI300>MA120 或 广度>0.35 → 正常震荡
+    BEAR:      其余 → 防御
     """
     if BENCHMARK_CODE not in prices.columns:
         return ("SIDEWAYS", 20, 5)
@@ -132,9 +134,12 @@ def _classify_market(
     trending_up = ma_s > ma_m
     broad_healthy = breadth > 0.6
 
+    # 顺序关键：RECOVERY必须在SIDEWAYS之前
     if above_market and trending_up and broad_healthy:
         return ("BULL", 10, 3)
-    elif above_market or breadth > 0.35:  # 广度收紧到35%
+    elif prev_state == "BEAR" and above_market and breadth > 0.25:
+        return ("RECOVERY", RECOVERY_WINDOW, RECOVERY_TOP_N)
+    elif above_market or breadth > 0.35:
         return ("SIDEWAYS", 20, 5)
     else:
         return ("BEAR", 40, 2)
@@ -486,6 +491,7 @@ def generate_signals(
     # ── 状态平滑变量 ──
     committed_state: str = "SIDEWAYS"
     reentry_count: int = 0  # BEAR→RISK 重入计数器
+    recovery_weeks: int = 0  # RECOVERY 已持续周期数
 
     # ── 最小调仓变量 ──
     prev_weights: dict[str, float] = {}
@@ -494,28 +500,87 @@ def generate_signals(
         if date not in momentum_df.index:
             continue
 
-        # ── 市场状态判断（广度增强）──
+        # ── 市场状态判断（广度增强 + RECOVERY）──
         if use_market_state_machine:
             raw_state, dyn_window, dyn_top_n = _classify_market(
                 prices, date, ma_trend_short, ma_trend_medium, market_ma_window,
+                prev_state=committed_state,
             )
-            state = raw_state  # 默认自由切换
+            state = raw_state
 
-            # ── 重入过滤：BEAR→RISK 需连续确认，其他方向自由 ──
-            if raw_state == "BEAR":
-                reentry_count = 0
-            elif committed_state == "BEAR" and raw_state != "BEAR":
-                reentry_count += 1
-                if reentry_count < RISK_ON_CONFIRM_DAYS:
-                    state = "BEAR"  # 保持防御，等待确认
+            # ── RECOVERY 管理：BEAR→RECOVERY 需确认，RECOVERY内动态N ──
+            if raw_state == "RECOVERY":
+                if committed_state == "BEAR":
+                    reentry_count += 1
+                    if reentry_count < RISK_ON_CONFIRM_DAYS:
+                        state = "BEAR"
+                    else:
+                        reentry_count = 0
+                        recovery_weeks = 0
                 else:
-                    reentry_count = 0
+                    recovery_weeks += 1
+
+                    # 动态N：按波动率等级决定所需确认周数
+                    bm = prices[BENCHMARK_CODE] if BENCHMARK_CODE in prices.columns else None
+                    vol_level = 1  # 默认中波
+                    if bm is not None and date in bm.index:
+                        idx = bm.index.get_loc(date)
+                        if idx >= 60:
+                            rets = bm.pct_change().iloc[idx-60:idx+1].dropna()
+                            if len(rets) > 10:
+                                ewma_alpha = 2.0 / (VOL_EWMA_HALFLIFE + 1)
+                                ewma_var = rets.iloc[0] ** 2
+                                for r in rets.iloc[1:]:
+                                    ewma_var = ewma_alpha * (r**2) + (1-ewma_alpha) * ewma_var
+                                current_vol = np.sqrt(ewma_var)
+                                hist_vols = rets.rolling(10).std().median()
+                                if current_vol < hist_vols * 0.8:
+                                    vol_level = 0
+                                elif current_vol > hist_vols * 1.3:
+                                    vol_level = 2
+                    required_weeks = {0: 2, 1: 3, 2: 5}[vol_level]
+
+                    if recovery_weeks >= required_weeks:
+                        # 晋升：MA120×1.02 确认趋势才进BULL
+                        bm_p = prices[BENCHMARK_CODE] if BENCHMARK_CODE in prices.columns else None
+                        if bm_p is not None and date in bm_p.index:
+                            idx2 = bm_p.index.get_loc(date)
+                            if idx2 >= 120:
+                                close = bm_p.iloc[idx2]
+                                ma120 = bm_p.iloc[idx2-119:idx2+1].mean()
+                                ma_s = bm_p.iloc[max(0,idx2-20):idx2+1].mean()
+                                ma_m = bm_p.iloc[max(0,idx2-60):idx2+1].mean()
+                                if close > ma120 * 1.02 and ma_s > ma_m:
+                                    state = "BULL"
+                                else:
+                                    state = "SIDEWAYS"
+                            else:
+                                state = "SIDEWAYS"
+                        else:
+                            state = "SIDEWAYS"
+                        recovery_weeks = 0
+            elif raw_state == "BEAR":
+                reentry_count = 0
+                recovery_weeks = 0
+            else:
+                # 从RECOVERY晋升后继续自由切换
+                if committed_state == "RECOVERY":
+                    pass  # 已经在上面晋升了
+                elif committed_state == "BEAR" and raw_state != "BEAR":
+                    reentry_count += 1
+                    if reentry_count < RISK_ON_CONFIRM_DAYS:
+                        state = "BEAR"
+                    else:
+                        reentry_count = 0
 
             committed_state = state
 
             if state == "BULL":
                 ef_window = state_bull_window
                 ef_top_n = state_bull_top_n
+            elif state == "RECOVERY":
+                ef_window = RECOVERY_WINDOW
+                ef_top_n = RECOVERY_TOP_N
             elif state == "BEAR":
                 ef_window = state_bear_window
                 ef_top_n = dyn_top_n
@@ -652,6 +717,12 @@ def generate_signals(
         if black_swan_risk_mult < 1.0:
             for code in scaled_weights:
                 scaled_weights[code] = round(scaled_weights[code] * black_swan_risk_mult, 4)
+
+        # ── RECOVERY 半风险预算：单只上限降到正常的一半 ──
+        if state == "RECOVERY":
+            for code in list(scaled_weights.keys()):
+                if scaled_weights[code] > RECOVERY_MAX_WEIGHT:
+                    scaled_weights[code] = RECOVERY_MAX_WEIGHT
 
         # ── 最小调仓阈值：权重变化 < 5% → 跳过本周 ──
         if MIN_REBALANCE_PCT > 0 and prev_weights:

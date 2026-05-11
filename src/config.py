@@ -116,6 +116,11 @@ ASYMMETRIC_COOLDOWN: bool = False
 
 # 重入过滤（默认启用 — 仅限制 BEAR→RISK，其他方向自由）
 RISK_ON_CONFIRM_DAYS: int = 3      # BEAR→RISK需连续N个调仓周期确认
+
+# RECOVERY 恢复态（三层状态机核心 — BEAR→RECOVERY→ACTIVE）
+RECOVERY_WINDOW: int = 40          # 恢复期动量窗口（偏长，防假突破）
+RECOVERY_TOP_N: int = 3            # 恢复期持仓数（试探性进攻）
+RECOVERY_MAX_WEIGHT: float = 0.15  # 单只上限（正常的一半 = 半风险预算）
 POSITION_BUFFER: int = 4            # 持仓缓冲区：买入Top5，持有Top9，卖出>9
 
 # 溢价限制 — 连续惩罚函数（仅在 > 3% 时生效）
