@@ -17,6 +17,7 @@ python main.py --trade-ui        # 交互式交易录入面板
 |------|------|------|
 | `python main.py` | 单次回测 | ~20s |
 | `python main.py --signal` | 本周实盘持仓建议 | ~15s |
+| `python main.py --log BUY/SELL 代码 价格 股数 [溢价%] [备注]` | 快捷交易录入 | 即时 |
 | `python main.py --trade-ui` | 交互式交易录入面板 | 手动 |
 | `python main.py --track` | 实盘交易统计（5维dashboard） | ~1s |
 | `python main.py --preflight` | 盘前7项数据检查 | ~5s |
@@ -113,17 +114,15 @@ Level 5  溢价辅助    → 连续惩罚（<3%忽略，≥3%逐步衰减）
 ### 交易录入
 
 ```bash
+# 交互面板（自动显示操作建议）
 python main.py --trade-ui
+
+# 命令行快捷录入
+python main.py --log BUY 513100 1.250 1000 1.2% 按信号买入
+python main.py --log SELL 510300 1.150 500
 ```
 
-交互面板自动显示本周操作建议 + 当前持仓对比，标注该买/该卖。一行一条录入：
-
-```
-BUY 513100 1.250 1000 1.2% 按信号买入
-SELL 510300 1.150 500
-```
-
-自动写入 `ops/trade_log.csv`。
+自动写入 SQLite 数据库 `ops/trade_log.db`。
 
 ### 交易统计
 
