@@ -2,7 +2,7 @@
 name: etf-signal-and-log
 description: |
   生成 ETF 动量轮动系统的本周实盘持仓建议，以及快捷录入实际交易。
-  当用户说"信号/持仓/建议/调仓/买入/卖出/录入/记录"时使用。
+  当用户说"信号/持仓/建议/调仓/买入/卖出/录入/记录/撤销/删除/写错"时使用。
 ---
 
 # ETF 动量轮动 — 实盘操作
@@ -60,6 +60,21 @@ python main.py --track
 | 溢价% | ❌ | 买入时溢价率（如1.2%） |
 | 备注 | ❌ | 自由文本 |
 
+## 交易补救
+
+写错时无需手动操作数据库：
+
+```bash
+# 查看最近20条交易（含ID）
+python main.py --log-list
+
+# 撤销最后一条
+python main.py --log-undo
+
+# 删除指定ID
+python main.py --log-delete <ID>
+```
+
 ## 工作流
 
 ```bash
@@ -71,6 +86,10 @@ python main.py --log BUY 513100 1.250 1000
 python main.py --log BUY 512760 1.180 800
 python main.py --log SELL 510300 1.150 500
 
-# 3. 确认统计
+# 3. 写错了？撤销
+python main.py --log-undo
+python main.py --log-list
+
+# 4. 确认统计
 python main.py --track
 ```
