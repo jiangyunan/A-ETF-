@@ -260,6 +260,8 @@ def main() -> None:
     elif "--trade-ui" in args or "--track-ui" in args:
         from src.ops.trade_ui import run_trade_ui
         run_trade_ui()
+    elif "--signal" in args:
+        run_signal()
     elif "--preflight" in args:
         from src.data.fetcher import fetch_all_etf_data
         from src.ops.preflight import run_and_log_preflight
