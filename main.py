@@ -32,6 +32,7 @@ from src.config import (
     REBALANCE_FREQ,
     USE_VOL_TARGET, VOL_TARGET,
     USE_PREMIUM_FILTER,
+    DEFENSE_ETF_CODES,
     BENCHMARK_CODE, OUTPUT_DIR,
 )
 from src.data.fetcher import fetch_all_etf_data, fetch_etf_nav
@@ -136,16 +137,18 @@ def run_single_backtest() -> None:
 
 
 def run_signal() -> None:
-    """生成本周的实盘信号：只输出持仓建议，不做回测。"""
-    today = datetime.now().strftime("%Y%m%d")
+    """生成本周的实盘信号：基于最新交易日数据，强制评估。"""
+    today_str = datetime.now().strftime("%Y%m%d")
 
     print("=" * 60)
     print("  ETF 动量轮动 V2 — 本周实盘信号")
     print("=" * 60)
 
-    # 拉取最新数据（到今天就够，只要覆盖20日窗口）
+    # 拉取最新数据
     print(f"\n正在拉取最新行情...")
-    prices, _ = fetch_all_etf_data(start=START_DATE, end=today)
+    prices, _ = fetch_all_etf_data(start=START_DATE, end=today_str)
+    latest_date = prices.index[-1]
+    print(f"      数据更新至: {latest_date.date()}")
 
     # 实时溢价数据
     premium_data = None
@@ -155,53 +158,95 @@ def run_signal() -> None:
             spot = ak.fund_etf_spot_em()
             if '基金折价率' in spot.columns and '代码' in spot.columns:
                 spot_map = dict(zip(spot['代码'], spot['基金折价率']))
-                # 转为按代码索引的 Series（溢价率 = 负的折价率，或直接用折价率绝对值）
                 prem_series = pd.Series({c: abs(float(spot_map.get(c, 0))) / 100
                                          for c in prices.columns
-                                         if c in spot_map},
-                                        dtype=float)
+                                         if c in spot_map}, dtype=float)
                 if not prem_series.empty:
-                    # 构造一个虚拟的 premium DataFrame（用最新日期）
-                    today_dt = pd.Timestamp(today)
-                    premium_data = pd.DataFrame([prem_series], index=[today_dt])
+                    premium_data = pd.DataFrame([prem_series], index=[latest_date])
                     print(f"      实时溢价: {len(prem_series)} 只 ETF")
         except Exception as e:
             print(f"      溢价数据获取失败: {e}")
 
-    # 生成全部信号，取最后一条
-    signals = generate_weekly_signals(
-        prices,
-        window=MOMENTUM_WINDOW, top_n=TOP_N,
-        use_risk_adjusted=USE_RISK_ADJUSTED,
-        use_composite_momentum=USE_COMPOSITE_MOMENTUM,
-        composite_windows=MOMENTUM_WINDOWS_COMPOSITE,
-        composite_weights=MOMENTUM_WEIGHTS,
-        use_market_state_machine=USE_MARKET_STATE_MACHINE,
-        state_bull_window=STATE_BULL_WINDOW,
-        state_bull_top_n=STATE_BULL_TOP_N,
-        state_sideways_window=STATE_SIDEWAYS_WINDOW,
-        state_sideways_top_n=STATE_SIDEWAYS_TOP_N,
-        state_bear_window=STATE_BEAR_WINDOW,
-        ma_trend_short=MA_TREND_SHORT, ma_trend_medium=MA_TREND_MEDIUM,
-        market_ma_window=MARKET_MA_WINDOW,
-        use_correlation_filter=USE_CORRELATION_FILTER,
-        correlation_window=CORRELATION_WINDOW,
-        correlation_threshold=CORRELATION_THRESHOLD,
-        use_dynamic_position=USE_DYNAMIC_POSITION,
-        top_n_aggressive=TOP_N_AGGRESSIVE,
-        use_relative_strength=USE_RELATIVE_STRENGTH,
-        rebalance_freq=REBALANCE_FREQ,
-        use_vol_target=USE_VOL_TARGET, vol_target=VOL_TARGET,
-        premium_data=premium_data,
-    )
+    # 强制用最新交易日生成信号（覆盖调度频率，始终取最后一天）
+    import src.config as cfg
+    orig_freq = cfg.REBALANCE_FREQ
+    cfg.REBALANCE_FREQ = 1
 
-    if signals.empty:
+    # 从策略模块直接取动量计算函数，用最新日期强制评估
+    from src.strategy.momentum import (
+        calc_risk_adjusted_momentum, calc_composite_momentum,
+        _classify_market, _filter_by_correlation, _market_breadth,
+        _apply_premium_filter,
+    )
+    from src.strategy.black_swan import evaluate_black_swan
+    import numpy as np
+
+    # 动量计算
+    momentum_df = calc_risk_adjusted_momentum(prices, MOMENTUM_WINDOW)
+
+    # 状态判断
+    state, _, _ = _classify_market(prices, latest_date,
+        ma_trend_short=MA_TREND_SHORT, ma_trend_medium=MA_TREND_MEDIUM,
+        ma_market=MARKET_MA_WINDOW)
+
+    # 选池
+    attack_codes = [c for c in ETF_POOL if c not in DEFENSE_ETF_CODES]
+    defense_codes = [c for c in DEFENSE_ETF_CODES if c in prices.columns]
+
+    if state == "BEAR":
+        pool = defense_codes
+    else:
+        pool = [c for c in attack_codes if c in momentum_df.columns]
+
+    # 取最后一天的动量排名
+    if latest_date not in momentum_df.index:
+        latest_date = momentum_df.index[-1]
+    row = momentum_df.loc[latest_date, pool].dropna()
+    row = row[row > 0]
+
+    # 溢价过滤
+    weight_penalty_prem = {}
+    if premium_data is not None and not premium_data.empty:
+        row, weight_penalty_prem = _apply_premium_filter(row, premium_data, latest_date)
+        row = row.dropna()
+        row = row[row > 0]
+
+    # 动态持仓数
+    n_pick = { "BULL": STATE_BULL_TOP_N, "SIDEWAYS": STATE_SIDEWAYS_TOP_N, "BEAR": 2 }.get(state, TOP_N)
+    n_pick = min(n_pick, len(row))
+
+    top = row.nlargest(n_pick * 2)
+    selected = list(top.index)
+
+    # 相关性过滤
+    if USE_CORRELATION_FILTER and state != "BEAR" and len(selected) > 1:
+        selected = _filter_by_correlation(selected, prices, latest_date)
+
+    selected = selected[:n_pick]
+    base_weight = 1.0 / len(selected) if selected else 0
+
+    # 构建信号表
+    latest_signals_list = []
+    for code in selected:
+        penalty = weight_penalty_prem.get(code, 1.0)
+        latest_signals_list.append({
+            "date": latest_date,
+            "code": code,
+            "name": ETF_POOL.get(code, ""),
+            "momentum": round(float(row.get(code, 0)), 4),
+            "weight": round(base_weight * penalty, 4),
+            "state": state,
+            "holiday_delay": False,
+        })
+
+    cfg.REBALANCE_FREQ = orig_freq
+
+    if not latest_signals_list:
         print("\n  当前无信号（全部 ETF 下跌趋势中，建议空仓观望）")
         return
 
-    # 取最新一期的信号
-    latest_date = signals["date"].max()
-    latest_signals = signals[signals["date"] == latest_date]
+    latest_signals = pd.DataFrame(latest_signals_list)
+    latest_date = latest_signals["date"].iloc[0]
 
     print(f"\n{'=' * 60}")
     print(f"  信号日期: {latest_date.date()}")
