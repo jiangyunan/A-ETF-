@@ -19,7 +19,11 @@ python main.py --trade-ui        # 交互式交易录入面板
 | `python main.py --signal` | 本周实盘持仓建议 | ~15s |
 | `python main.py --trade-ui` | 交互式交易录入面板 | 手动 |
 | `python main.py --track` | 实盘交易统计（5维dashboard） | ~1s |
+| `python main.py --preflight` | 盘前7项数据检查 | ~5s |
+| `python main.py --alerts` | 6类风险告警检测 | ~5s |
+| `python main.py --trade-source` | 交易来源拆解分析 | ~20s |
 | `python main.py --attribution` | 收益归因分析 | ~20s |
+| `python main.py --migrate` | CSV→SQLite 数据迁移 | ~1s |
 | `python main.py --optimize` | 网格搜索最优参数 | ~5min |
 | `python main.py --walk-forward` | 滚动回测（纯OOS） | ~5min |
 | `python main.py --stability` | 参数稳定性热力图 | ~3min |
@@ -46,7 +50,10 @@ src/
 │   ├── monte_carlo.py     # 蒙特卡洛生存测试
 │   └── attribution.py     # 收益归因分析
 ├── ops/
-│   ├── trade_log.py       # 交易日志模型 + 5维统计引擎
+│   ├── db.py              # SQLite 数据库（四表） + CRUD
+│   ├── preflight.py       # 7项盘前检查
+│   ├── risk_alerts.py     # 6类风险告警
+│   ├── trade_log.py       # 交易日志 + 5维统计引擎
 │   └── trade_ui.py        # 交互式交易录入面板
 └── __init__.py
 main.py                    # 主入口
@@ -181,7 +188,9 @@ output/
 └── trade_ops_report.xlsx          # 实盘统计
 
 ops/
-└── trade_log.csv                  # 交易日志（手动录入）
+├── trade_log.db                  # 交易数据库（SQLite）
+├── trade_log.csv                 # 交易日志（CSV兼容）
+└── alerts.log                    # 告警历史
 ```
 
 ## 绩效概览（10年 2016-2026）
