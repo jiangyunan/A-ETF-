@@ -17,3 +17,4 @@ data/cache/
 
 # Trade log (user data)
 ops/trade_log.csv
+ops/trade_log.db

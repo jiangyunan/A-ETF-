@@ -28,7 +28,7 @@ from src.config import (
 )
 from src.data.fetcher import fetch_all_etf_data
 from src.strategy.momentum import generate_signals
-from src.ops.trade_log import load_trade_log, create_empty_log, TRADE_LOG_COLUMNS
+from src.ops.trade_log import load_trade_log, create_empty_log, _parse_pct
 
 TRADE_LOG_PATH = "ops/trade_log.csv"
 
@@ -177,18 +177,26 @@ def run_trade_ui():
         premium = parts[4] if len(parts) > 4 and "%" in parts[4] else "0%"
         notes = " ".join(parts[5:]) if len(parts) > 5 else ""
 
-        # 写入 CSV
+        # 写入 SQLite + CSV
         today = datetime.now().strftime("%Y-%m-%d")
         signal_date = signal["date"].iloc[0].strftime("%Y-%m-%d") if not signal.empty else today
         state_val = signal["state"].iloc[0] if not signal.empty and "state" in signal.columns else "?"
 
+        from src.ops.db import insert_trade
+        insert_trade({
+            "date": today, "action": action, "code": code,
+            "name": ETF_POOL.get(code, code), "price": price, "shares": shares,
+            "premium_pct": _parse_pct(premium), "signal_date": signal_date,
+            "state": state_val, "notes": notes,
+        })
+
+        # 同步写 CSV（兼容旧格式）
         new_row = pd.DataFrame([{
             "date": today, "action": action, "code": code,
             "name": ETF_POOL.get(code, code), "price": price, "shares": shares,
             "premium": premium, "signal_date": signal_date,
             "state": state_val, "notes": notes,
         }])
-
         log_path = TRADE_LOG_PATH
         if os.path.exists(log_path):
             existing = pd.read_csv(log_path)
