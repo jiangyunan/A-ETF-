@@ -141,6 +141,10 @@ PREMIUM_BAN_ABSOLUTE: float = 0.12  # >12% 绝对禁止
 # Level 4  动量        → 风险调整动量 → 排名选前 N
 # Level 5  溢价辅助    → 连续惩罚动量分 + 衰减权重
 
+# ---- 资金管理 ----
+INITIAL_CAPITAL: float = 100_000.0  # 初始资金（元），用于 --signal 计算买入股数
+MIN_LOT_SIZE: int = 100               # A股最小交易单位（手 = 100股）
+
 # ---- 基准 ----
 BENCHMARK_CODE: str = "510300"  # 沪深300ETF，用于对比
 

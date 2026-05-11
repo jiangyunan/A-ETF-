@@ -8,12 +8,20 @@
   4. 数据断更     — 行情数据滞后 > 48h
   5. 仓位异常     — 实际仓位偏离信号 > 15%
   6. 回撤突破     — 净值跌破 -15%
+
+输出:
+  - 控制台: Rich 美化告警列表
+  - risk_alerts 表: 详细记录
 """
 
 import numpy as np
 import pandas as pd
 
 from src.ops.db import insert_alert, get_open_alerts, resolve_alert
+from src.ops.console import (
+    console, print_header, print_success, print_warning, print_error,
+    print_info, print_dim, print_divider,
+)
 
 
 def check_vol_spike(prices, vol_lookback: int = 20) -> list[dict]:
@@ -119,15 +127,16 @@ def run_all_alerts(
         aid = insert_alert(a["type"], a["level"], a["msg"])
         alert_ids.append(aid)
 
-    # 控制台输出
+    # 控制台输出（Rich 美化）
     if all_alerts:
-        print(f"\n{'=' * 50}")
-        print(f"  ⚠️ 风险告警 ({len(all_alerts)} 条)")
+        print_header(f"风险告警 ({len(all_alerts)} 条)")
         for a in all_alerts:
-            icon = "🔴" if a["level"] == "CRITICAL" else "⚠️"
-            print(f"  {icon} [{a['level']}] {a['type']}: {a['msg']}")
-        print(f"{'=' * 50}")
+            if a["level"] == "CRITICAL":
+                print_error(f"[{a['level']}] {a['type']}: {a['msg']}")
+            else:
+                print_warning(f"[{a['level']}] {a['type']}: {a['msg']}")
+        print_divider()
     else:
-        print("  ✅ 无风险告警")
+        print_success("无风险告警")
 
     return {"alerts": all_alerts, "ids": alert_ids}

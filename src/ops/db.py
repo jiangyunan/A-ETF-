@@ -90,6 +90,17 @@ CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(date);
 CREATE INDEX IF NOT EXISTS idx_trades_code ON trades(code);
 CREATE INDEX IF NOT EXISTS idx_preflight_date ON preflight(run_date);
 CREATE INDEX IF NOT EXISTS idx_risk_alerts_date ON risk_alerts(alert_date);
+CREATE TABLE IF NOT EXISTS capital (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    date        TEXT NOT NULL,
+    total       REAL NOT NULL,          -- 总资产（元）
+    cash        REAL NOT NULL,          -- 可用现金（元）
+    market_value REAL DEFAULT 0.0,      -- 持仓市值（元）
+    notes       TEXT DEFAULT '',
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_capital_date ON capital(date);
 CREATE INDEX IF NOT EXISTS idx_signals_date ON signals(signal_date);
 """
 
@@ -310,6 +321,40 @@ def migrate_from_csv(csv_path: str = "ops/trade_log.csv") -> int:
         insert_trade(data)
         count += 1
     return count
+
+
+# ─── Capital CRUD ──────────────────────────────────────────
+
+def get_latest_capital() -> dict | None:
+    """获取最近一条资金记录。"""
+    conn = _connect()
+    row = conn.execute("SELECT * FROM capital ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_capital(total: float, cash: float, market_value: float = 0.0,
+                   notes: str = "", date: str | None = None) -> int:
+    """写入一条资金快照，返回 id。"""
+    conn = _connect()
+    cur = conn.execute(
+        "INSERT INTO capital (date, total, cash, market_value, notes) VALUES (?,?,?,?,?)",
+        (date or datetime.now().strftime("%Y-%m-%d"), total, cash, market_value, notes),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_capital_history(limit: int = 30) -> list[dict]:
+    """获取资金历史记录。"""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT * FROM capital ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ─── Init on import ────────────────────────────────────────

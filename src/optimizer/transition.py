@@ -21,6 +21,11 @@ from src.config import OUTPUT_DIR
 from src.data.fetcher import fetch_all_etf_data
 from src.strategy.momentum import generate_signals
 from src.backtest.engine import run_backtest
+from src.ops.console import (
+    console, print_header, print_subheader, print_success, print_warning,
+    print_error, print_info, print_dim, print_metric, print_key_value,
+    make_table, print_divider,
+)
 
 
 def run_transition_analytics() -> dict:
@@ -102,23 +107,24 @@ def run_transition_analytics() -> dict:
     avg_ret_20d = df["ret_20d"].mean()
     avg_promotion_lag = df[df["success"]]["duration_weeks"].mean() if df["success"].any() else 0
 
-    # 输出
-    print(f"\n{'=' * 60}")
-    print(f"  TRANSITION 统计（{len(df)} 次 BEAR→RECOVERY 事件）")
-    print(f"{'=' * 60}")
-    print(f"  成功率 (RECOVERY→ACTIVE):   {success_rate:.0%}")
-    print(f"  假突破率 (RECOVERY→BEAR):   {fake_breakout_rate:.0%}")
-    print(f"  平均恢复周期:                {avg_duration:.1f} 周")
-    print(f"  晋升平均延迟 (Promotion Lag): {avg_promotion_lag:.1f} 周")
-    print(f"  恢复后20日平均收益:           {avg_ret_20d:.2%}")
-    print(f"  恢复期平均总收益:             {df['total_return'].mean():.2%}")
+    # 输出（Rich 美化）
+    print_header(f"TRANSITION 统计（{len(df)} 次 BEAR→RECOVERY 事件）")
+    print_metric("成功率 (RECOVERY→ACTIVE)", f"{success_rate:.0%}")
+    print_metric("假突破率 (RECOVERY→BEAR)", f"{fake_breakout_rate:.0%}")
+    print_metric("平均恢复周期", f"{avg_duration:.1f} 周")
+    print_metric("晋升平均延迟 (Promotion Lag)", f"{avg_promotion_lag:.1f} 周")
+    print_metric("恢复后20日平均收益", f"{avg_ret_20d:.2%}")
+    print_metric("恢复期平均总收益", f"{df['total_return'].mean():.2%}")
 
-    print(f"\n  最近 5 次 RECOVERY 事件:")
+    print_subheader("最近 5 次 RECOVERY 事件")
     for _, e in df.tail(5).iterrows():
-        icon = "✅" if e["success"] else "❌"
-        print(f"    {e['recovery_start'].date()} → {e['recovery_end'].date()}  "
-              f"{e['duration_weeks']}周 → {e['result']:10}  "
-              f"20d={e['ret_20d']:.1%}  total={e['total_return']:.1%} {icon}")
+        icon = "🟢" if e["success"] else "🔴"
+        color = "green" if e["success"] else "red"
+        console.print(
+            f"  {icon} [{color}]{e['recovery_start'].date()} → {e['recovery_end'].date()}"
+            f"  {e['duration_weeks']}周 → {e['result']:10}"
+            f"  20d={e['ret_20d']:.1%}  total={e['total_return']:.1%}[/{color}]"
+        )
 
     # 导出
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -132,6 +138,6 @@ def run_transition_analytics() -> dict:
                   f"{avg_ret_20d:.2%}", str(len(df))],
         })
         summary.to_excel(w, sheet_name="Transition摘要", index=False)
-    print(f"\n[Excel] {xlsx}")
+    print_success(f"Excel: {xlsx}")
 
     return {"events": df, "success_rate": success_rate, "fake_breakout_rate": fake_breakout_rate}

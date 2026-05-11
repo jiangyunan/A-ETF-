@@ -11,7 +11,7 @@
   7. 数据断更    — 最新数据 > 3 天
 
 输出:
-  - 控制台: 逐项 PASS/FAIL/WARN
+  - 控制台: 逐项 PASS/FAIL/WARN（Rich 美化）
   - ops/preflight 表: 详细记录
 """
 
@@ -21,6 +21,10 @@ import numpy as np
 
 from src.ops.db import insert_preflight, get_latest_preflight
 from src.config import ETF_POOL
+from src.ops.console import (
+    console, print_header, print_success, print_warning, print_error,
+    print_info, print_dim, print_divider,
+)
 
 
 def run_preflight(
@@ -148,21 +152,22 @@ def run_and_log_preflight(prices, spot_data=None) -> bool:
     today = datetime.now().strftime("%Y-%m-%d")
     insert_preflight(today, results)
 
-    # 控制台输出
-    print(f"\n{'=' * 60}")
-    print(f"  盘前检查 — {today}")
-    print(f"{'=' * 60}")
+    # 控制台输出（Rich 美化）
+    print_header(f"盘前检查 — {today}")
     fail_count = 0
     for r in results:
-        icon = {"PASS": "✅", "FAIL": "❌", "WARN": "⚠️"}.get(r["status"], "?")
-        print(f"  {icon} {r['check']:<20} {r.get('detail', '')}")
-        if r["status"] == "FAIL":
+        if r["status"] == "PASS":
+            print_success(f"{r['check']:<20} {r.get('detail', '')}")
+        elif r["status"] == "FAIL":
+            print_error(f"{r['check']:<20} {r.get('detail', '')}")
             fail_count += 1
-    print(f"{'=' * 60}")
+        else:
+            print_warning(f"{r['check']:<20} {r.get('detail', '')}")
+    print_divider()
 
     if fail_count > 0:
-        print(f"\n  ❌ {fail_count} 项检查失败，建议停止运行。")
+        print_error(f"{fail_count} 项检查失败，建议停止运行。")
         return False
     else:
-        print(f"\n  ✅ 所有检查通过，可以继续。")
+        print_success("所有检查通过，可以继续。")
         return True

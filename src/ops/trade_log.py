@@ -23,6 +23,11 @@ import numpy as np
 import pandas as pd
 
 from src.config import OUTPUT_DIR
+from src.ops.console import (
+    console, print_header, print_subheader, print_success, print_warning,
+    print_error, print_info, print_dim, print_metric, print_key_value,
+    make_table, print_divider,
+)
 
 TRADE_LOG_COLUMNS = [
     "date", "action", "code", "name", "price", "shares",
@@ -271,9 +276,7 @@ def analyze_trade_log(log_path: str = "ops/trade_log.csv") -> dict:
 
 def run_trade_ops() -> None:
     """运行实盘交易统计并输出报告。"""
-    print("=" * 60)
-    print("  实盘交易统计（Trade Operations Dashboard）")
-    print("=" * 60)
+    print_header("实盘交易统计（Trade Operations Dashboard）")
 
     log_path = "ops/trade_log.csv"
     result = analyze_trade_log(log_path)
@@ -290,14 +293,12 @@ def run_trade_ops() -> None:
     ]
 
     for title, key in sections:
-        print(f"\n{'─' * 40}")
-        print(f"  {title}")
-        print(f"{'─' * 40}")
+        print_subheader(title)
         data = result.get(key, {})
         if not data:
-            print("  无数据")
+            print_dim("无数据")
         for k, v in data.items():
-            print(f"  {k}: {v}")
+            print_metric(k, str(v))
 
     # 导出 Excel
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -312,9 +313,9 @@ def run_trade_ops() -> None:
                     if data:
                         pd.DataFrame(list(data.items()), columns=["指标", "数值"]).to_excel(
                             w, sheet_name=title[:31], index=False)
-            print(f"\n[Excel] {xlsx}")
+            print_success(f"Excel: {xlsx}")
     except Exception as e:
-        print(f"\n[警告] Excel 导出失败: {e}")
+        print_warning(f"Excel 导出失败: {e}")
 
-    print(f"\n交易日志: ops/trade_log.csv")
-    print(f"每笔交易后手动记录一行，再次运行 python main.py --track 更新统计。")
+    print_dim(f"交易日志: ops/trade_log.csv")
+    print_dim("每笔交易后手动记录一行，再次运行 python main.py --track 更新统计。")
