@@ -408,6 +408,47 @@ def main() -> None:
         print(f"✅ 已录入: {action} {code} {ETF_POOL.get(code,code)} @{price:.3f} ×{shares} = ¥{price*shares:.0f}")
         return
 
+    # ── 交易撤销/查看 ──
+    if "--log-undo" in args:
+        from src.ops.db import delete_last_trade
+        deleted = delete_last_trade()
+        if deleted:
+            print(f"✅ 已撤销: {deleted['action']} {deleted['code']} {deleted['name']} @{deleted['price']} ×{deleted['shares']} (ID={deleted['id']})")
+        else:
+            print("无交易记录可撤销")
+        return
+
+    if "--log-list" in args:
+        from src.ops.db import get_trades
+        trades = get_trades()
+        if not trades:
+            print("无交易记录")
+            return
+        print(f"\n{'ID':<5} {'日期':<12} {'操作':<6} {'代码':<8} {'名称':<14} {'价格':>8} {'股数':>8} {'备注'}")
+        print("-" * 75)
+        for t in trades[-20:]:
+            print(f"{t['id']:<5} {t['date']:<12} {t['action']:<6} {t['code']:<8} {t['name']:<14} {t['price']:>8.3f} {t['shares']:>8} {t.get('notes','')[:15]}")
+        return
+
+    if "--log-delete" in args:
+        from src.ops.db import delete_trade_by_id
+        idx = args.index("--log-delete")
+        if idx + 1 >= len(args):
+            print("用法: python main.py --log-delete <ID>")
+            print("先用 --log-list 查看 ID")
+            return
+        try:
+            tid = int(args[idx + 1])
+        except ValueError:
+            print(f"错误: ID 必须是数字")
+            return
+        deleted = delete_trade_by_id(tid)
+        if deleted:
+            print(f"✅ 已删除: ID={tid}  {deleted['action']} {deleted['code']} {deleted['name']} @{deleted['price']}")
+        else:
+            print(f"ID={tid} 不存在")
+        return
+
     if "--optimize" in args:
         from src.optimizer.scanner import run_optimizer
         run_optimizer()

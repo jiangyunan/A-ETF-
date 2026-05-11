@@ -141,6 +141,32 @@ def get_trades(start_date: str | None = None, end_date: str | None = None) -> li
     return [dict(r) for r in rows]
 
 
+def delete_last_trade() -> dict | None:
+    """删除最近一条交易记录，返回被删除的内容。"""
+    conn = _connect()
+    row = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 1").fetchone()
+    if row is None:
+        conn.close()
+        return None
+    conn.execute("DELETE FROM trades WHERE id = ?", (row["id"],))
+    conn.commit()
+    conn.close()
+    return dict(row)
+
+
+def delete_trade_by_id(trade_id: int) -> dict | None:
+    """按 ID 删除一条交易记录。"""
+    conn = _connect()
+    row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return None
+    conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    conn.commit()
+    conn.close()
+    return dict(row)
+
+
 def get_trade_stats() -> dict:
     """交易宏观统计（SQL 聚合）。"""
     conn = _connect()
