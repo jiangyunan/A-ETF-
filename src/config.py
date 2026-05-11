@@ -109,8 +109,12 @@ CASH_EQUIVALENT_CODE: str = "511010"   # 国债ETF
 
 # 实盘降摩擦
 MIN_REBALANCE_PCT: float = 0.10     # 权重变化 < 10% → 不交易（跳过微调）
-STATE_SMOOTHING: bool = False       # 状态平滑（默认关闭，会延迟状态切换）
-STATE_COOLDOWN: int = 2             # 冷却期（周数）：切换后至少保持N周
+STATE_SMOOTHING: bool = False       # 状态平滑（关闭，由RISK_ON_CONFIRM替代）
+STATE_COOLDOWN: int = 1             # 冷却期（已废弃，保留兼容）
+ASYMMETRIC_COOLDOWN: bool = True
+
+# 重入过滤（仅限制 BEAR→RISK 过渡，其他方向自由切换）
+RISK_ON_CONFIRM_DAYS: int = 3      # BEAR→RISK需连续N个调仓周期确认才恢复进攻
 POSITION_BUFFER: int = 4            # 持仓缓冲区：买入Top5，持有Top9，卖出>9
 
 # 溢价限制 — 连续惩罚函数（仅在 > 3% 时生效）

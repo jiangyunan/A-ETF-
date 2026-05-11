@@ -29,6 +29,8 @@ from src.config import (
     MIN_REBALANCE_PCT,
     STATE_SMOOTHING,
     STATE_COOLDOWN,
+    ASYMMETRIC_COOLDOWN,
+    RISK_ON_CONFIRM_DAYS,
     POSITION_BUFFER,
     VOL_EWMA_HALFLIFE,
     VOL_NORMALIZE,
@@ -482,9 +484,8 @@ def generate_signals(
     signals: list[dict] = []
 
     # ── 状态平滑变量 ──
-    prev_committed_state: str = "SIDEWAYS"
-    state_candidate: str | None = None
-    state_count: int = 0
+    committed_state: str = "SIDEWAYS"
+    reentry_count: int = 0  # BEAR→RISK 重入计数器
 
     # ── 最小调仓变量 ──
     prev_weights: dict[str, float] = {}
@@ -493,23 +494,24 @@ def generate_signals(
         if date not in momentum_df.index:
             continue
 
-        # ── 市场状态判断（广度增强 + 平滑）──
+        # ── 市场状态判断（广度增强）──
         if use_market_state_machine:
             raw_state, dyn_window, dyn_top_n = _classify_market(
                 prices, date, ma_trend_short, ma_trend_medium, market_ma_window,
             )
-            # 状态平滑：连续 N 周同一原始状态才正式切换
-            if STATE_SMOOTHING:
-                if raw_state == state_candidate:
-                    state_count += 1
+            state = raw_state  # 默认自由切换
+
+            # ── 重入过滤：BEAR→RISK 需连续确认，其他方向自由 ──
+            if raw_state == "BEAR":
+                reentry_count = 0
+            elif committed_state == "BEAR" and raw_state != "BEAR":
+                reentry_count += 1
+                if reentry_count < RISK_ON_CONFIRM_DAYS:
+                    state = "BEAR"  # 保持防御，等待确认
                 else:
-                    state_candidate = raw_state
-                    state_count = 1
-                state = prev_committed_state if state_count < STATE_COOLDOWN else raw_state
-                if state_count >= STATE_COOLDOWN:
-                    prev_committed_state = raw_state
-            else:
-                state = raw_state
+                    reentry_count = 0
+
+            committed_state = state
 
             if state == "BULL":
                 ef_window = state_bull_window
