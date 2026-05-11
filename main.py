@@ -370,6 +370,44 @@ def main() -> None:
     if not _check_data_freshness():
         return
 
+    # ── 快捷录入：python main.py --log BUY 513100 1.250 1000 1.2% 备注 ──
+    if "--log" in args:
+        from datetime import datetime
+        from src.ops.db import insert_trade
+        from src.config import ETF_POOL
+        idx = args.index("--log")
+        log_args = args[idx + 1:]
+        if len(log_args) < 4:
+            print("用法: python main.py --log BUY/SELL 代码 价格 股数 [溢价%] [备注]")
+            print("示例: python main.py --log BUY 513100 1.250 1000 1.2% 按信号买入")
+            return
+        action = log_args[0].upper()
+        if action not in ("BUY", "SELL"):
+            print(f"错误: 第一个参数必须是 BUY 或 SELL，收到 {action}")
+            return
+        code = log_args[1]
+        try:
+            price = float(log_args[2])
+            shares = int(log_args[3])
+        except ValueError:
+            print("错误: 价格和股数必须是数字")
+            return
+        premium = log_args[4] if len(log_args) > 4 else "0%"
+        if "%" in premium:
+            premium_pct = float(premium.strip("%")) / 100
+        else:
+            premium_pct = float(premium) / 100 if premium.replace('.','',1).isdigit() else 0.0
+        notes = " ".join(log_args[5:]) if len(log_args) > 5 else ""
+        today = datetime.now().strftime("%Y-%m-%d")
+        insert_trade({
+            "date": today, "action": action, "code": code,
+            "name": ETF_POOL.get(code, code), "price": price, "shares": shares,
+            "premium_pct": premium_pct, "signal_date": today,
+            "state": "?", "notes": notes,
+        })
+        print(f"✅ 已录入: {action} {code} {ETF_POOL.get(code,code)} @{price:.3f} ×{shares} = ¥{price*shares:.0f}")
+        return
+
     if "--optimize" in args:
         from src.optimizer.scanner import run_optimizer
         run_optimizer()
