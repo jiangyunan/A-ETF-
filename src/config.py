@@ -86,15 +86,26 @@ DEFENSE_ETF_CODES: list[str] = ["511010", "511260", "159322"]
 # 调仓频率
 REBALANCE_FREQ: int = 1
 
-# 波动率仓位控制 — 离散化（减少微调仓）
+# 波动率仓位控制 — 逆波动率风险平价
 USE_VOL_TARGET: bool = True
 VOL_TARGET: float = 0.15
 VOL_LOOKBACK: int = 20
+VOL_EWMA_HALFLIFE: int = 20             # EWMA 半衰期（≈20日，替代简单std）
 VOL_CAP: float = 1.5
-VOL_DISCRETE: bool = True           # 离散化仓位（100%/70%/40% 三档）
-VOL_TIER_HIGH: float = 1.0          # 低波 → 满仓
-VOL_TIER_MID: float = 0.7           # 中波 → 七成仓
-VOL_TIER_LOW: float = 0.4           # 高波 → 四成仓
+VOL_DISCRETE: bool = True
+VOL_TIER_HIGH: float = 1.0
+VOL_TIER_MID: float = 0.7
+VOL_TIER_LOW: float = 0.4
+VOL_NORMALIZE: bool = True              # 逆波权重归一化（sum=1.0）
+
+# 风险预算约束
+MAX_SINGLE_WEIGHT: float = 0.25        # 单只 ETF 上限
+MAX_GROUP_EXPOSURE: float = 0.40       # 大类资产上限
+MIN_WEIGHT_THRESHOLD: float = 0.05     # 最小权重（低于则剔除）
+USE_TREND_FILTER_WEIGHT: bool = True   # close < MA120 → 权重=0
+
+# 现金替代（trend filter 后无合格资产时）
+CASH_EQUIVALENT_CODE: str = "511010"   # 国债ETF
 
 # 实盘降摩擦
 MIN_REBALANCE_PCT: float = 0.10     # 权重变化 < 10% → 不交易（跳过微调）

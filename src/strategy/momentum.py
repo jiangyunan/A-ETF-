@@ -30,6 +30,13 @@ from src.config import (
     STATE_SMOOTHING,
     STATE_COOLDOWN,
     POSITION_BUFFER,
+    VOL_EWMA_HALFLIFE,
+    VOL_NORMALIZE,
+    MAX_SINGLE_WEIGHT,
+    MAX_GROUP_EXPOSURE,
+    MIN_WEIGHT_THRESHOLD,
+    USE_TREND_FILTER_WEIGHT,
+    CASH_EQUIVALENT_CODE,
 )
 from src.strategy.black_swan import evaluate_black_swan
 
@@ -235,33 +242,122 @@ def _calc_vol_scaled_weights(
     tier_high: float = VOL_TIER_HIGH,
     tier_mid: float = VOL_TIER_MID,
     tier_low: float = VOL_TIER_LOW,
+    normalize: bool = VOL_NORMALIZE,
+    ewma_halflife: int = VOL_EWMA_HALFLIFE,
+    max_single: float = MAX_SINGLE_WEIGHT,
+    max_group: float = MAX_GROUP_EXPOSURE,
+    min_weight: float = MIN_WEIGHT_THRESHOLD,
+    trend_filter_weight: bool = USE_TREND_FILTER_WEIGHT,
 ) -> dict[str, float]:
+    """
+    V3: EWMA波动率 + 趋势过滤 + 逆波动率归一化 + 风险预算约束。
+
+    流程：1.TrendFilter → 2.EWMA vol → 3.逆波缩放 → 4.归一化 → 5.单只上限 → 6.大类上限 → 7.最小阈值 → 8.离散化
+    """
     weights: dict[str, float] = {}
     date_pos = prices.index.get_loc(date)
-    lookback_start = max(0, date_pos - vol_lookback)
-    for code in selected_codes:
-        if code not in prices.columns:
-            weights[code] = base_weight; continue
-        hist = prices[code].iloc[lookback_start:date_pos + 1]
-        if len(hist) < 5:
+
+    GROUP_MAP = {
+        "成长": ["512760", "513100", "513500", "159915", "513050", "516160"],
+        "A股宽基": ["510300", "510500", "510880"],
+        "A股行业": ["512000", "512660", "512170", "561660", "159873"],
+        "跨境": ["513520", "513030", "513120"],
+        "商品": ["159322", "159518"],
+        "债券": ["511010", "511260"],
+    }
+
+    # Step 1: 趋势过滤
+    valid_codes = []
+    if trend_filter_weight:
+        ma120 = prices.rolling(window=120).mean()
+        for code in selected_codes:
+            if code not in prices.columns:
+                continue
+            c = prices[code].loc[date] if date in prices[code].index else None
+            m = ma120[code].loc[date] if code in ma120.columns and date in ma120.index else None
+            if c is not None and m is not None and c > m:
+                valid_codes.append(code)
+            elif c is None:
+                valid_codes.append(code)
+    else:
+        valid_codes = [c for c in selected_codes if c in prices.columns]
+
+    if not valid_codes:
+        cash_code = CASH_EQUIVALENT_CODE
+        if cash_code in prices.columns:
+            return {cash_code: 1.0}
+        return {}
+
+    # Step 2: EWMA volatility → inverse vol weight
+    alpha = 2.0 / (ewma_halflife + 1)
+    for code in valid_codes:
+        hist = prices[code].iloc[max(0, date_pos - 120):date_pos + 1]
+        if len(hist) < 20:
             weights[code] = base_weight; continue
         daily_ret = hist.pct_change().dropna()
-        if len(daily_ret) < 5 or daily_ret.std() == 0:
+        if len(daily_ret) < 10:
             weights[code] = base_weight; continue
-        realized_vol = daily_ret.std() * np.sqrt(252)
-        scale = min(vol_target / realized_vol, vol_cap)
-        raw = base_weight * scale
+        ewma_var = daily_ret.iloc[0] ** 2
+        for r in daily_ret.iloc[1:]:
+            ewma_var = alpha * (r ** 2) + (1 - alpha) * ewma_var
+        realized_vol = np.sqrt(ewma_var) * np.sqrt(252)
+        if realized_vol == 0:
+            weights[code] = base_weight; continue
+        weights[code] = base_weight * min(vol_target / realized_vol, vol_cap)
 
-        if discrete:
-            # 离散化三档：100% / 70% / 40%
-            if raw >= base_weight * 0.85:
-                raw = base_weight * tier_high
-            elif raw >= base_weight * 0.55:
-                raw = base_weight * tier_mid
+    if not weights:
+        return {}
+
+    # Step 3: normalize → sum = 1.0
+    if normalize:
+        total = sum(weights.values())
+        if total > 0:
+            weights = {c: w / total for c, w in weights.items()}
+
+    # Step 4: single cap 25%
+    excess = 0.0
+    for c in list(weights.keys()):
+        if weights[c] > max_single:
+            excess += weights[c] - max_single
+            weights[c] = max_single
+    if excess > 0:
+        eligible = [c for c in weights if weights[c] < max_single]
+        if eligible:
+            spread = excess / len(eligible)
+            for c in eligible:
+                weights[c] = min(weights[c] + spread, max_single)
+
+    # Step 5: group cap 40%
+    for gname, gcodes in GROUP_MAP.items():
+        gw = [c for c in gcodes if c in weights]
+        if not gw:
+            continue
+        gw_sum = sum(weights[c] for c in gw)
+        if gw_sum > max_group:
+            scale = max_group / gw_sum
+            for c in gw:
+                weights[c] *= scale
+
+    # Step 6: min threshold 5%
+    weights = {c: w for c, w in weights.items() if w >= min_weight}
+
+    # Step 7: re-normalize
+    if normalize and weights:
+        total = sum(weights.values())
+        if total > 0:
+            weights = {c: w / total for c, w in weights.items()}
+
+    # Step 8: discrete tiers (if enabled)
+    if discrete and weights:
+        for c in list(weights.keys()):
+            w = weights[c]
+            if w >= 0.20:
+                weights[c] = round(w, 4)
+            elif w >= 0.12:
+                weights[c] = round(w * 0.7, 4)
             else:
-                raw = base_weight * tier_low
+                weights[c] = round(w * 0.4, 4)
 
-        weights[code] = round(raw, 4)
     return weights
 
 
