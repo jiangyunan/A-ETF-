@@ -1,9 +1,9 @@
 """
-数据获取模块：从 akshare 拉取 ETF 日线行情，并支持本地 CSV 缓存。
+数据获取模块：从 akshare 拉取 ETF 日线行情，并支持本地 Parquet 缓存。
 
 工作流程：
-  1. 检查 data/cache/ 下是否有缓存 CSV
-  2. 对缺失或过期的数据，调用 akshare 接口拉取
+  1. 检查 data/cache/ 下是否有缓存 Parquet
+  2. 对缺失或过期的数据，调用 akshare 接口拉取增量
   3. 拉取后更新本地缓存
   4. 将所有 ETF 的收盘价合并为一张宽表（行=日期，列=代码）
 
@@ -22,24 +22,36 @@ from src.config import ETF_POOL, START_DATE, END_DATE, CACHE_DIR, BENCHMARK_CODE
 
 
 def _get_cache_path(code: str) -> str:
-    """返回某只 ETF 的缓存文件路径，如 data/cache/510300.csv"""
-    return os.path.join(CACHE_DIR, f"{code}.csv")
+    """返回某只 ETF 的缓存文件路径，如 data/cache/510300.parquet"""
+    return os.path.join(CACHE_DIR, f"{code}.parquet")
 
 
 def _load_cache(code: str) -> pd.DataFrame | None:
-    """尝试从本地 CSV 加载缓存数据，不存在则返回 None"""
-    path = _get_cache_path(code)
-    if not os.path.exists(path):
-        return None
-    df = pd.read_csv(path, parse_dates=["日期"])
-    return df
+    """尝试从本地 Parquet 加载缓存数据，不存在则尝试从旧 CSV 迁移"""
+    pq_path = _get_cache_path(code)
+    csv_path = os.path.join(CACHE_DIR, f"{code}.csv")
+
+    if os.path.exists(pq_path):
+        df = pd.read_parquet(pq_path)
+        if "日期" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["日期"]):
+            df["日期"] = pd.to_datetime(df["日期"])
+        return df
+
+    # 旧 CSV 自动迁移
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path, parse_dates=["日期"])
+        _save_cache(code, df)
+        os.remove(csv_path)
+        return df
+
+    return None
 
 
 def _save_cache(code: str, df: pd.DataFrame) -> None:
-    """将数据写入本地 CSV 缓存"""
+    """将数据写入本地 Parquet 缓存"""
     os.makedirs(CACHE_DIR, exist_ok=True)
     try:
-        df.to_csv(_get_cache_path(code), index=False)
+        df.to_parquet(_get_cache_path(code), index=False)
     except OSError as e:
         print(f"[警告] 缓存写入失败 {code}: {e}")
 
@@ -216,12 +228,25 @@ def fetch_etf_nav(
 
     nav_series = {}
     for code in codes:
-        cache_path = os.path.join(CACHE_DIR, f"{code}_nav.csv")
+        cache_pq = os.path.join(CACHE_DIR, f"{code}_nav.parquet")
+        cache_csv = os.path.join(CACHE_DIR, f"{code}_nav.csv")
 
-        # 检查缓存
-        if os.path.exists(cache_path):
-            df = pd.read_csv(cache_path, parse_dates=["净值日期"])
+        # 检查 Parquet 缓存
+        if os.path.exists(cache_pq):
+            df = pd.read_parquet(cache_pq)
             if not df.empty:
+                if "净值日期" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["净值日期"]):
+                    df["净值日期"] = pd.to_datetime(df["净值日期"])
+                s = df.set_index("净值日期")["单位净值"].rename(code)
+                nav_series[code] = s
+                continue
+
+        # 迁移旧 CSV
+        if os.path.exists(cache_csv):
+            df = pd.read_csv(cache_csv, parse_dates=["净值日期"])
+            if not df.empty:
+                df.to_parquet(cache_pq, index=False)
+                os.remove(cache_csv)
                 s = df.set_index("净值日期")["单位净值"].rename(code)
                 nav_series[code] = s
                 continue
@@ -236,9 +261,8 @@ def fetch_etf_nav(
             df = df[(df["净值日期"] >= datetime.strptime(start, "%Y%m%d"))
                     & (df["净值日期"] <= datetime.strptime(end, "%Y%m%d"))]
 
-            # 缓存
             os.makedirs(CACHE_DIR, exist_ok=True)
-            df.to_csv(cache_path, index=False)
+            df.to_parquet(cache_pq, index=False)
 
             s = df.set_index("净值日期")["单位净值"].rename(code)
             nav_series[code] = s
