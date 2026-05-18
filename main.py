@@ -327,6 +327,125 @@ def run_signal() -> None:
     print_money("预估总成本", total_cost)
     console.print(f"  [dim]资金利用率: {total_cost/available_capital*100:.0f}%[/dim]")
 
+    # ── 获取上期信号，计算调仓指令 ──
+    from src.ops.db import get_latest_signals as _get_prev, save_signals as _save_signals
+    prev_list = _get_prev()
+    prev_codes = {s["code"] for s in prev_list} if prev_list else set()
+    prev_weight = {s["code"]: s.get("weight", 0) for s in prev_list} if prev_list else {}
+    prev_shares = {s["code"]: s.get("shares", 0) for s in prev_list} if prev_list else {}
+    curr_codes = set(latest_signals["code"].tolist())
+    curr_weight = dict(zip(latest_signals["code"], latest_signals["weight"]))
+    curr_shares = dict(zip(latest_signals["code"], latest_signals["shares"]))
+
+    # 卖出: 上期持有但本期不在
+    sell_codes = prev_codes - curr_codes
+    # 买入: 本期持有但上期不在
+    buy_new_codes = curr_codes - prev_codes
+    # 调仓: 两期都持有，股数有变化
+    adjust_codes = curr_codes & prev_codes
+
+    if prev_codes or sell_codes or buy_new_codes:
+        print_header("调仓指令", width=80)
+
+        if sell_codes:
+            sell_rows = []
+            for code in sorted(sell_codes):
+                name = ETF_POOL.get(code, code)
+                w = prev_weight.get(code, 0)
+                s = prev_shares.get(code, 0)
+                lots = s // MIN_LOT_SIZE if MIN_LOT_SIZE > 0 else 0
+                sell_rows.append([
+                    f"[bold]{code}[/bold]",
+                    name,
+                    f"{w:.1%}",
+                    f"{s:,}",
+                    f"{lots}",
+                    "[bold bright_red]卖出[/bold bright_red]",
+                ])
+            sell_table = make_table(
+                "卖出",
+                ["代码", "名称", "旧权重", "旧股数", "旧手数", "操作"],
+                sell_rows,
+                styles=["left", "left", "right", "right", "right", "center"],
+            )
+            console.print(sell_table)
+
+        if buy_new_codes:
+            buy_rows = []
+            for code in sorted(buy_new_codes):
+                row_data = latest_signals[latest_signals["code"] == code].iloc[0]
+                px = row_data.get("price", 0)
+                cost = row_data["shares"] * px
+                buy_rows.append([
+                    f"[bold]{code}[/bold]",
+                    row_data["name"],
+                    f"{row_data['weight']:.1%}",
+                    f"{px:.3f}",
+                    f"{row_data['shares']:,}",
+                    f"{row_data['lots']}",
+                    f"[bright_green]¥{cost:,.0f}[/bright_green]",
+                    "[bold bright_green]买入[/bold bright_green]",
+                ])
+            buy_table = make_table(
+                "买入",
+                ["代码", "名称", "权重", "价格", "股数", "手数", "金额", "操作"],
+                buy_rows,
+                styles=["left", "left", "right", "right", "right", "right", "right", "center"],
+            )
+            console.print(buy_table)
+
+        # 调仓: 持有但股数变化
+        adjust_diff = []
+        for code in sorted(adjust_codes):
+            old_s = prev_shares.get(code, 0)
+            new_s = curr_shares.get(code, 0)
+            diff = new_s - old_s
+            if abs(diff) >= MIN_LOT_SIZE:
+                row_data = latest_signals[latest_signals["code"] == code].iloc[0]
+                px = row_data.get("price", 0)
+                adjust_diff.append((code, old_s, new_s, diff, row_data, px))
+
+        if adjust_diff:
+            adj_rows = []
+            for code, old_s, new_s, diff, row_data, px in adjust_diff:
+                action = "[bold bright_green]加仓[/bold bright_green]" if diff > 0 else "[bold bright_red]减仓[/bold bright_red]"
+                cost = abs(diff) * px
+                adj_rows.append([
+                    f"[bold]{code}[/bold]",
+                    row_data["name"],
+                    f"{old_s:,}",
+                    f"{new_s:,}",
+                    f"{'+' if diff > 0 else ''}{diff:,}",
+                    f"[bright_green]¥{cost:,.0f}[/bright_green]" if diff > 0 else f"[bright_red]¥{cost:,.0f}[/bright_red]",
+                    action,
+                ])
+            adj_table = make_table(
+                "调仓（股数变动 ≥ 1 手）",
+                ["代码", "名称", "旧股数", "新股数", "变动", "变动金额", "操作"],
+                adj_rows,
+                styles=["left", "left", "right", "right", "right", "right", "center"],
+            )
+            console.print(adj_table)
+
+        if not sell_codes and not buy_new_codes and not adjust_diff:
+            print_success("持仓不变，无需调仓")
+
+    # ── 保存本期信号快照 ──
+    save_data = []
+    for _, row_data in latest_signals.iterrows():
+        save_data.append({
+            "date": str(row_data["date"].date() if hasattr(row_data["date"], 'date') else row_data["date"]),
+            "code": row_data["code"],
+            "name": row_data["name"],
+            "momentum": row_data.get("momentum", 0),
+            "weight": row_data.get("weight", 0),
+            "shares": int(row_data.get("shares", 0)),
+            "price": float(row_data.get("price", 0)),
+            "state": row_data.get("state", "?"),
+            "holiday_delay": int(row_data.get("holiday_delay", False)),
+        })
+    _save_signals(save_data)
+
     # 执行提示
     is_holiday = latest_signals["holiday_delay"].iloc[0] if "holiday_delay" in latest_signals.columns else False
     if is_holiday:

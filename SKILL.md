@@ -3,6 +3,7 @@ name: etf-signal-and-log
 description: |
   生成 ETF 动量轮动系统的本周实盘持仓建议，以及快捷录入实际交易。
   当用户说"信号/持仓/建议/调仓/买入/卖出/录入/记录/撤销/删除/写错"时使用。
+  交互面板、统计dashboard、来源拆解参见 etf-trade-ops 技能。
 ---
 
 # ETF 动量轮动 — 实盘操作

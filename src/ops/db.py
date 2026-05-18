@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS signals (
     name        TEXT,
     momentum    REAL,
     weight      REAL,
+    shares      INTEGER DEFAULT 0,
+    price       REAL DEFAULT 0.0,
     state       TEXT,
     holiday_delay INTEGER DEFAULT 0,
     created_at  TEXT DEFAULT (datetime('now','localtime'))
@@ -106,9 +108,15 @@ CREATE INDEX IF NOT EXISTS idx_signals_date ON signals(signal_date);
 
 
 def init_db() -> None:
-    """初始化数据库（幂等）。"""
+    """初始化数据库（幂等），含列迁移。"""
     conn = _connect()
     conn.executescript(SCHEMA)
+    # 迁移: 为已有 signals 表添加 shares/price 列
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    if "shares" not in existing:
+        conn.execute("ALTER TABLE signals ADD COLUMN shares INTEGER DEFAULT 0")
+    if "price" not in existing:
+        conn.execute("ALTER TABLE signals ADD COLUMN price REAL DEFAULT 0.0")
     conn.commit()
     conn.close()
 
@@ -274,9 +282,10 @@ def save_signals(signals_data: list[dict]) -> None:
     conn.execute("DELETE FROM signals")
     for s in signals_data:
         conn.execute(
-            "INSERT INTO signals (signal_date,code,name,momentum,weight,state,holiday_delay) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO signals (signal_date,code,name,momentum,weight,shares,price,state,holiday_delay) VALUES (?,?,?,?,?,?,?,?,?)",
             (s["date"], s["code"], s.get("name", ""), s.get("momentum", 0),
-             s.get("weight", 0), s.get("state", "?"), int(s.get("holiday_delay", 0))),
+             s.get("weight", 0), s.get("shares", 0), s.get("price", 0),
+             s.get("state", "?"), int(s.get("holiday_delay", 0))),
         )
     conn.commit()
     conn.close()
